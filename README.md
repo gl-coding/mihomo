@@ -1,4 +1,6 @@
-# Mihomo 本地代理（devtools/mihomo）
+# Mihomo 本地代理
+
+独立仓库：[gl-coding/mihomo](https://github.com/gl-coding/mihomo)。在 nginxRouter 中通常作为 **Git 子模块** 挂载于 `devtools/mihomo/`（路径不变，平台 `MIHOMO_DIR` 默认仍指向此处）。
 
 [Mihomo](https://github.com/MetaCubeX/mihomo)（原 Clash Meta 内核）在本机提供 **HTTP/SOCKS 出站代理** 与 **REST 控制 API**，供服务器访问外网（npm、Codex CLI 等），并为 nginxRouter 管理台 **「代理管理」**（`/proxy`）提供节点列表、切换、延迟测速、出口 IP 查询。
 
