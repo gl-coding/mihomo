@@ -1,0 +1,32 @@
+# bin — 可执行文件与官方压缩包
+bin/mihomo
+bin/*.gz
+
+# conf — 运行配置、订阅缓存、Geo 数据
+conf/active.yaml
+conf/iKuuu*.yaml
+conf/config.yaml
+conf/*.bak
+conf/profiles/*
+!conf/profiles/.gitkeep
+conf/geo/*
+!conf/geo/.gitkeep
+
+# cache — 运行缓存与日志
+cache/*
+!cache/.gitkeep
+
+# 旧版平铺布局（迁移后可能残留）
+mihomo
+*.gz
+*.mmdb
+*.metadb
+GeoSite.dat
+GeoIP.dat
+iKuuu*.yaml
+config.yaml
+*.log
+cache.db
+.subscription*
+*.bak
+/profiles/
