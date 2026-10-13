@@ -30,3 +30,13 @@ cache.db
 .subscription*
 *.bak
 /profiles/
+
+# 独立管理页
+admin/.venv/
+admin/node_modules/
+admin/.cache/
+admin/standalone/dist/
+
+# 订阅与环境（独立仓使用 repo 根 env/）
+env/*
+!env/.gitkeep

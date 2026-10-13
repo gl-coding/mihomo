@@ -6,6 +6,26 @@
 
 默认仅监听 **127.0.0.1**，不对外暴露代理端口。
 
+## 独立管理页（不依赖 nginxRouter）
+
+与 nginxRouter 管理台 **「代理管理」**（`/proxy`）同一套页面与 API，可在本仓库单独启动：
+
+```bash
+./admin/start.sh
+# 默认 http://127.0.0.1:8765/
+```
+
+- 后端逻辑在 `python/mihomo_mgr/`；nginxRouter 通过子模块路径复用同一代码。
+- 订阅与环境变量写入 **`env/.env.mihomo.local`**（独立运行时相对本仓库根目录；嵌入 nginxRouter 时仍使用主仓 `env/.env.mihomo.local`）。
+- 默认只监听本机，**无登录**（请勿将端口暴露到公网）。需要与平台一致的管理员鉴权时，请使用 nginxRouter 的 `/proxy`。
+
+开发前端（热更新，API 代理到 8765）：
+
+```bash
+cd admin && npm install && npm run dev
+# 另开终端：MIHOMO_STANDALONE=1 ./admin/start.sh --skip-build --port 8765
+```
+
 ## 在本项目中的角色
 
 | 端口 | 用途 |
@@ -180,6 +200,7 @@ curl -s https://api.ipify.org && echo
 
 ## 相关代码
 
-- 后端：`platform/backend/sites/mihomo_views.py`，`nginxmgr/settings.py` 中 `MIHOMO_API_BASE` / `MIHOMO_HTTP_PROXY`
-- 前端：`platform/frontend/src/pages/MihomoPage.vue`
-- Codex 走代理：`devtools/codex/env.sh`、`devtools/codex/README.md`
+- 共享后端：`python/mihomo_mgr/`（nginxRouter 中 `platform/backend/sites/mihomo_*.py` 为薄封装）
+- 独立管理页：`admin/start.sh`、`admin/standalone/`
+- 嵌入平台前端：`platform/frontend/src/pages/MihomoPage.vue`（与独立页同源）
+- Codex 走代理：`devtools/codex/env.sh`、`devtools/codex/README.md`（在 nginxRouter 仓内）
