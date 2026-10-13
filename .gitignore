@@ -31,6 +31,9 @@ cache.db
 *.bak
 /profiles/
 
+__pycache__/
+*.py[cod]
+
 # 独立管理页
 admin/.venv/
 admin/node_modules/
