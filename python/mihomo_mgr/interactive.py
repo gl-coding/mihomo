@@ -6,13 +6,15 @@ import sys
 from types import SimpleNamespace
 
 from .cli import (
-    cmd_delay_batch,
     cmd_select,
     cmd_sub_activate,
     cmd_sub_delete,
     cmd_sub_save,
     cmd_sub_update,
     cmd_verify_all,
+    print_numbered_delay_items,
+    print_numbered_nodes,
+    run_delay_batch_items,
 )
 from .config import load_config
 from .service import (
@@ -69,53 +71,95 @@ def _run(action) -> None:
         print("\n(已取消)")
 
 
-def _pick_subscription() -> str | None:
-    status = subscription_status()
-    items = status.get("items") or []
-    if not items:
-        print("暂无订阅，请先导入。")
+def _resolve_node_choice(raw: str, names: list[str]) -> str | None:
+    raw = raw.strip()
+    if not raw:
         return None
-    print("\n订阅列表：")
+    if raw.isdigit():
+        idx = int(raw) - 1
+        if 0 <= idx < len(names):
+            return names[idx]
+        print(f"序号无效，请输入 1–{len(names)}。")
+        return None
+    if raw in names:
+        return raw
+    print("未找到该节点，请输入列表中的序号或完整节点名。")
+    return None
+
+
+def print_numbered_subscriptions(items: list[dict]) -> None:
+    if not items:
+        print("暂无订阅。")
+        return
+    width = len(str(len(items)))
     for i, row in enumerate(items, 1):
-        mark = " [当前]" if row.get("active") else ""
-        print(f"  {i}. {row.get('name', '?')}{mark}  id={row.get('id')}")
-    raw = _prompt("选择序号或 id")
+        mark = "  ← 当前" if row.get("active") else ""
+        name = row.get("name") or "?"
+        nodes = row.get("node_count") if row.get("node_count") is not None else "?"
+        updated = (row.get("updated_at") or "—")[:19]
+        print(f"  {i:>{width}}. {name}{mark}  节点 {nodes}  更新 {updated}")
+        if row.get("url_display"):
+            print(f"       {row['url_display']}")
+    print(f"输入序号 1–{len(items)} 选择订阅。")
+
+
+def _subscription_item_by_choice(raw: str, items: list[dict]) -> dict | None:
+    raw = raw.strip()
     if not raw:
         return None
     if raw.isdigit():
         idx = int(raw) - 1
         if 0 <= idx < len(items):
-            return str(items[idx]["id"])
-        print("序号无效")
+            return items[idx]
+        print(f"序号无效，请输入 1–{len(items)}。")
         return None
-    return raw
+    found = next((row for row in items if str(row.get("id")) == raw), None)
+    if found:
+        return found
+    print("未找到该订阅，请用序号或 id。")
+    return None
 
 
-def _pick_node(*, prompt: str = "选择节点序号或名称") -> str | None:
-    code, data = _mihomo_request("GET", "/proxies")
-    if code != 200:
-        print("无法读取节点，请确认 Mihomo 已启动。")
+def _pick_subscription(*, prompt: str = "序号或 id") -> str | None:
+    status = subscription_status()
+    items = status.get("items") or []
+    if not items:
+        print("暂无订阅，请先导入。")
         return None
-    _, _, nodes, err = main_selector_state()
+    print()
+    print_numbered_subscriptions(items)
+    raw = _prompt(prompt)
+    item = _subscription_item_by_choice(raw, items)
+    return str(item["id"]) if item else None
+
+
+def _edit_subscription_item(item: dict) -> None:
+    print(f"\n编辑订阅：{item.get('name', '?')}  (id={item.get('id')})")
+    default_name = item.get("name") or ""
+    name = _prompt("订阅名称", default=default_name)
+    if not name.strip():
+        print("名称不能为空")
+        return
+    url = _prompt("订阅 URL（留空不修改）", default="")
+    via = _prompt_yes_no("经当前代理下载？", default=bool(item.get("via_proxy")))
+    payload: dict = {"id": item["id"], "name": name.strip(), "via_proxy": via}
+    if url.strip():
+        payload["url"] = url.strip()
+    cmd_sub_save(_ns(**payload))
+
+
+def _pick_node(*, prompt: str = "序号或节点名") -> str | None:
+    main_group, current, nodes, err = main_selector_state()
     if err:
         print(err)
         return None
     if not nodes:
         print("没有可选节点。")
         return None
-    print("\n节点：")
-    for i, name in enumerate(nodes, 1):
-        print(f"  {i}. {name}")
+    print()
+    print_numbered_nodes(main_group=main_group, current=current, nodes=nodes)
     raw = _prompt(prompt)
-    if not raw:
-        return None
-    if raw.isdigit():
-        idx = int(raw) - 1
-        if 0 <= idx < len(nodes):
-            return nodes[idx]
-        print("序号无效")
-        return None
-    return raw
+    return _resolve_node_choice(raw, nodes)
 
 
 def _action_status() -> None:
@@ -131,55 +175,50 @@ def _action_status() -> None:
 def _action_sub_list() -> None:
     status = subscription_status()
     items = status.get("items") or []
+    print_numbered_subscriptions(items)
     if not items:
-        print("暂无订阅。")
         return
-    for row in items:
-        mark = " [当前]" if row.get("active") else ""
-        print(
-            f"- {row.get('name', '?')}{mark}  "
-            f"节点 {row.get('node_count') or '?'}  "
-            f"更新 {row.get('updated_at') or '—'}  "
-            f"id={row.get('id')}"
-        )
-        if row.get("url_display"):
-            print(f"    {row['url_display']}")
+    raw = _prompt("输入序号编辑该订阅（留空返回）", default="")
+    item = _subscription_item_by_choice(raw, items)
+    if item:
+        _edit_subscription_item(item)
 
 
 def _action_sub_save() -> None:
-    edit_id = _prompt("编辑已有订阅 id（留空表示新建）")
+    status = subscription_status()
+    items = status.get("items") or []
+    if items:
+        print("已有订阅（输入序号可改为编辑该条，留空则新建）：")
+        print_numbered_subscriptions(items)
+    raw = _prompt("序号（留空=新建）", default="")
+    item = _subscription_item_by_choice(raw, items) if raw.strip() else None
+    if item:
+        _edit_subscription_item(item)
+        return
     name = _prompt("订阅名称")
     url = _prompt("完整 Clash/Mihomo 订阅 URL")
     via = _prompt_yes_no("经当前代理下载？", default=False)
-    payload: dict = {"name": name, "url": url, "via_proxy": via}
-    if edit_id:
-        payload["id"] = edit_id
-    cmd_sub_save(_ns(**payload))
+    cmd_sub_save(_ns(name=name, url=url, via_proxy=via))
 
 
 def _action_sub_update() -> None:
     status = subscription_status()
     items = status.get("items") or []
     active = status.get("active_id", "")
-    if items:
-        print("\n订阅列表（留空 = 更新当前启用）：")
-        for i, row in enumerate(items, 1):
-            mark = " [当前]" if row.get("active") else ""
-            print(f"  {i}. {row.get('name', '?')}{mark}  id={row.get('id')}")
+    if not items:
+        print("暂无订阅。")
+        return
+    print("留空并回车 = 更新当前启用的订阅")
+    print_numbered_subscriptions(items)
     raw = _prompt("序号或 id", default="")
     sub_id = None
-    if raw:
-        if raw.isdigit() and items:
-            idx = int(raw) - 1
-            if 0 <= idx < len(items):
-                sub_id = str(items[idx]["id"])
-            else:
-                print("序号无效")
-                return
-        else:
-            sub_id = raw
+    if raw.strip():
+        item = _subscription_item_by_choice(raw, items)
+        if not item:
+            return
+        sub_id = str(item["id"])
     elif not active:
-        print("当前无启用订阅，请指定 id。")
+        print("当前无启用订阅，请输入序号。")
         return
     cmd_sub_update(_ns(id=sub_id))
 
@@ -201,13 +240,15 @@ def _action_sub_delete() -> None:
 
 
 def _action_nodes() -> None:
-    from .cli import cmd_nodes
-
-    cmd_nodes(_ns())
+    main_group, current, nodes, err = main_selector_state()
+    if err:
+        print(err)
+        return
+    print_numbered_nodes(main_group=main_group, current=current, nodes=nodes)
 
 
 def _action_select() -> None:
-    node = _pick_node()
+    node = _pick_node(prompt="要切换到的序号或节点名")
     if not node:
         return
     cmd_select(_ns(node=node, group=None))
@@ -217,11 +258,25 @@ def _action_delay_batch() -> None:
     workers_raw = _prompt("并发数 (1-8)", default="4")
     workers = int(workers_raw) if workers_raw.isdigit() else 4
     print("将对主策略组全部节点测延迟…")
-    cmd_delay_batch(_ns(names=[], timeout=5000, url=None, workers=workers))
+    try:
+        items = run_delay_batch_items(workers=workers)
+    except SystemExit:
+        return
+    print()
+    print_numbered_delay_items(items)
+    if not items:
+        return
+    if not _prompt_yes_no("切换到某一节点？", default=True):
+        return
+    names = [str(r.get("name") or "") for r in items]
+    raw = _prompt("序号或节点名")
+    node = _resolve_node_choice(raw, names)
+    if not node:
+        return
+    cmd_select(_ns(node=node, group=None))
 
 
 def _action_verify_all() -> None:
-    """与 Web「一键验证」：出口 IP + 网站联通。"""
     cmd_verify_all(_ns(node="", group=None, no_sync=False))
 
 
@@ -246,13 +301,13 @@ def _action_start_background() -> None:
 
 MENU = (
     ("1", "Mihomo 运行状态", _action_status),
-    ("2", "订阅列表", _action_sub_list),
-    ("3", "导入 / 编辑订阅", _action_sub_save),
+    ("2", "订阅列表（序号编辑）", _action_sub_list),
+    ("3", "新建 / 导入订阅", _action_sub_save),
     ("4", "更新订阅", _action_sub_update),
     ("5", "启用订阅", _action_sub_activate),
     ("6", "删除订阅", _action_sub_delete),
-    ("7", "节点列表", _action_nodes),
-    ("8", "切换节点", _action_select),
+    ("7", "节点列表（带序号）", _action_nodes),
+    ("8", "切换节点（输入序号）", _action_select),
     ("9", "批量延迟测速", _action_delay_batch),
     ("10", "一键验证（出口 IP + 联通）", _action_verify_all),
     ("11", "后台启动 Mihomo", _action_start_background),

@@ -123,36 +123,32 @@ def cmd_sub_delete(args: argparse.Namespace) -> None:
     _emit({"ok": True, "message": "订阅已删除", **result}, json_mode=args.json)
 
 
+def print_numbered_nodes(*, main_group: str, current: str, nodes: list[str]) -> None:
+    print(f"策略组: {main_group}  当前: {current or '—'}")
+    if not nodes:
+        print("  （无节点）")
+        return
+    width = len(str(len(nodes)))
+    for i, name in enumerate(nodes, 1):
+        mark = "  ← 当前" if name == current else ""
+        print(f"  {i:>{width}}. {name}{mark}")
+    print(f"切换时输入序号 1–{len(nodes)}，或粘贴完整节点名。")
+
+
 def cmd_nodes(args: argparse.Namespace) -> None:
-    code, data = _mihomo_request("GET", "/proxies")
-    if code != 200 or not isinstance(data, dict):
-        _fail(data.get("message", "读取节点失败") if isinstance(data, dict) else "读取节点失败")
-    proxies = data.get("proxies") or {}
-    main_group = MAIN_SELECTOR
-    main = proxies.get(main_group)
-    if not main or main.get("type") != "Selector":
-        choices = [
-            (name, item)
-            for name, item in proxies.items()
-            if isinstance(item, dict) and item.get("type") == "Selector"
-        ]
-        if not choices:
-            _fail("未找到可手动选择的策略组")
-        main_group, main = next((c for c in choices if c[0] != "GLOBAL"), choices[0])
-    nodes = [n for n in main.get("all") or [] if n not in ("DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE")]
+    main_group, current, nodes, err = main_selector_state()
+    if err:
+        _fail(err)
     out = {
         "ok": True,
         "main_group": main_group,
-        "current": main.get("now", ""),
+        "current": current,
         "nodes": nodes,
     }
     if args.json:
         _emit(out, json_mode=True)
         return
-    print(f"策略组: {main_group}  当前: {out['current']}")
-    for name in nodes:
-        mark = " *" if name == out["current"] else ""
-        print(f"  {name}{mark}")
+    print_numbered_nodes(main_group=main_group, current=current, nodes=nodes)
 
 
 def cmd_select(args: argparse.Namespace) -> None:
@@ -177,36 +173,70 @@ def cmd_delay(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-def cmd_delay_batch(args: argparse.Namespace) -> None:
-    timeout = min(max(args.timeout, 1000), 15000)
-    url = args.url or "http://www.gstatic.com/generate_204"
-    workers = min(max(args.workers, 1), 8)
-    names = args.names
+def _sort_delay_items(items: list[dict]) -> list[dict]:
+    def sort_key(row: dict) -> tuple:
+        if row.get("ok"):
+            return (0, row.get("delay") or 99999, row.get("name") or "")
+        return (1, 99999, row.get("name") or "")
+
+    return sorted(items, key=sort_key)
+
+
+def run_delay_batch_items(
+    *,
+    names: list[str] | None = None,
+    timeout: int = 5000,
+    url: str | None = None,
+    workers: int = 4,
+) -> list[dict]:
+    timeout = min(max(timeout, 1000), 15000)
+    test_url = url or "http://www.gstatic.com/generate_204"
+    workers = min(max(workers, 1), 8)
     if not names:
-        names, err = _main_group_nodes()
+        node_list, err = _main_group_nodes()
         if err:
             _fail(err)
+        names = node_list
     names = [str(n).strip() for n in names if str(n).strip()][:80]
     results: list[dict | None] = [None] * len(names)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(_measure_delay, name, timeout_ms=timeout, test_url=url): i
+            pool.submit(_measure_delay, name, timeout_ms=timeout, test_url=test_url): i
             for i, name in enumerate(names)
         }
         for fut in as_completed(futures):
             results[futures[fut]] = fut.result()
-    items = [r for r in results if r is not None]
+    return _sort_delay_items([r for r in results if r is not None])
+
+
+def print_numbered_delay_items(items: list[dict]) -> None:
+    ok_n = sum(1 for x in items if x.get("ok"))
+    print(f"测速完成：{ok_n}/{len(items)} 可达（按延迟从低到高）")
+    if not items:
+        return
+    width = len(str(len(items)))
+    for i, row in enumerate(items, 1):
+        name = row.get("name") or "?"
+        if row.get("ok"):
+            print(f"  {i:>{width}}. {name}  {row['delay']} ms")
+        else:
+            print(f"  {i:>{width}}. {name}  失败 ({row.get('message', '')})")
+    print(f"切换节点可输入序号 1–{len(items)}。")
+
+
+def cmd_delay_batch(args: argparse.Namespace) -> None:
+    items = run_delay_batch_items(
+        names=list(args.names) if args.names else None,
+        timeout=args.timeout,
+        url=args.url,
+        workers=args.workers,
+    )
     ok_n = sum(1 for x in items if x.get("ok"))
     out = {"ok": True, "message": f"测速完成：{ok_n}/{len(items)} 可达", "items": items}
     if args.json:
         _emit(out, json_mode=True)
         return
-    print(out["message"])
-    for row in sorted(items, key=lambda x: x.get("name") or ""):
-        if row.get("ok"):
-            print(f"  {row['name']}: {row['delay']} ms")
-        else:
-            print(f"  {row['name']}: 失败 ({row.get('message', '')})")
+    print_numbered_delay_items(items)
 
 
 def cmd_ip(args: argparse.Namespace) -> None:
