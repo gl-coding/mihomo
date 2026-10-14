@@ -18,6 +18,12 @@ class MihomoConfig:
 
     @property
     def settings_path(self) -> Path:
+        """订阅与多订阅 JSON，位于 mihomo 仓 env/（与 bin/conf/cache 同级）。"""
+        return self.mihomo_dir / "env" / ".env.mihomo.local"
+
+    @property
+    def legacy_settings_path(self) -> Path:
+        """旧版 nginxRouter 主仓 env/.env.mihomo.local（首次读取时自动迁移）。"""
         return self.project_root / "env" / ".env.mihomo.local"
 
 

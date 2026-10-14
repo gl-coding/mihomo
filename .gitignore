@@ -33,6 +33,7 @@ cache.db
 
 __pycache__/
 *.py[cod]
+.venv/
 
 # 独立管理页
 admin/.venv/
@@ -40,6 +41,7 @@ admin/node_modules/
 admin/.cache/
 admin/standalone/dist/
 
-# 订阅与环境（独立仓使用 repo 根 env/）
+# 订阅与环境（本仓 env/）
 env/*
 !env/.gitkeep
+!env/.env.example

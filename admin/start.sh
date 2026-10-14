@@ -28,7 +28,7 @@ usage() {
   MIHOMO_API_BASE / MIHOMO_HTTP_PROXY（与 nginxRouter 相同）
 
 访问: http://127.0.0.1:8765/
-订阅设置文件: $REPO_ROOT/env/.env.mihomo.local
+订阅设置文件: $REPO_ROOT/env/.env.mihomo.local（模板 env/.env.example）
 EOF
 }
 

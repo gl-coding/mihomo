@@ -1,0 +1,2 @@
+# CLI / mihomo_mgr（menu、sub、测速等）
+PyYAML>=6.0.3

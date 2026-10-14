@@ -627,7 +627,7 @@ onMounted(() => { loadAll(); loadSubscription(); });
             <el-radio-button :value="true">通过当前代理</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <p class="mh-tip">链接保存在服务器 <code>env/.env.mihomo.local</code>，不提交 Git。保存后对该订阅点「更新」拉取配置。</p>
+        <p class="mh-tip">链接保存在 <code>env/.env.mihomo.local</code>（本仓根目录），不提交 Git。保存后对该订阅点「更新」拉取配置。</p>
       </el-form>
       <template #footer>
         <el-button :disabled="subscriptionSaving" @click="subscriptionDialogVisible = false">取消</el-button>

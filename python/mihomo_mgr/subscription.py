@@ -53,8 +53,24 @@ def config_path() -> Path:
         raise SubscriptionError(str(exc)) from exc
 
 
+def _migrate_settings_file_if_needed() -> None:
+    cfg = load_config()
+    target = cfg.settings_path
+    legacy = cfg.legacy_settings_path
+    if target.is_file() or not legacy.is_file():
+        return
+    if legacy.resolve() == target.resolve():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(legacy, target)
+    target.chmod(0o600)
+
+
 def _settings_path() -> Path:
-    return load_config().settings_path
+    _migrate_settings_file_if_needed()
+    path = load_config().settings_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 _SETTING_KEYS = (
@@ -185,7 +201,9 @@ def _profiles(values: dict) -> tuple[list, str]:
             if isinstance(profiles, str):
                 profiles = json.loads(profiles)
         except json.JSONDecodeError as exc:
-            raise SubscriptionError("订阅列表配置损坏，请编辑 env/.env.mihomo.local 或重新添加订阅") from exc
+            raise SubscriptionError(
+                "订阅列表配置损坏，请编辑 devtools/mihomo/env/.env.mihomo.local 或重新添加订阅"
+            ) from exc
         if isinstance(profiles, list):
             return profiles, values.get("MIHOMO_SUBSCRIPTION_ACTIVE_ID", "")
     url = values.get("MIHOMO_SUBSCRIPTION_URL", "")

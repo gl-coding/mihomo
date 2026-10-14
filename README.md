@@ -6,6 +6,36 @@
 
 默认仅监听 **127.0.0.1**，不对外暴露代理端口。
 
+## 命令行管理（run.sh）
+
+**交互菜单（推荐）**：
+
+```bash
+./run.sh menu
+# 或 ./run.sh ctl
+```
+
+数字选项覆盖订阅、节点、测速、出口 IP、外网连通性等；非交互子命令仍可用于脚本。
+
+与 Web/API 共用 `python/mihomo_mgr` 逻辑（需 **PyYAML**；在 nginxRouter 内会自动用 `platform/backend/.venv`，也可设 `MIHOMO_PYTHON`）：
+
+```bash
+./run.sh status
+./run.sh sub list
+./run.sh sub save --name 我的订阅 --url 'https://…' [--via-proxy|--direct]
+./run.sh sub update [id]          # 从机场拉取更新
+./run.sh sub activate <id>
+./run.sh sub delete <id>
+./run.sh nodes
+./run.sh select '节点名'
+./run.sh delay-batch [--workers 4]   # 主策略组批量测延迟；单节点请用 Web/API
+./run.sh ip                       # 验证出口 IP（本机直连 + 代理，同步当前节点）
+./run.sh verify-all               # 一键验证：出口 IP + 网站联通
+./run.sh connectivity all         # 仅联通验证 google / chatgpt / ipify
+```
+
+各命令支持 `--json`。完整子命令：`./run.sh ctl --help`（与 `./run.sh status` 等等价）。
+
 ## 独立管理页（不依赖 nginxRouter）
 
 与 nginxRouter 管理台 **「代理管理」**（`/proxy`）同一套页面与 API，可在本仓库单独启动：
@@ -16,7 +46,8 @@
 ```
 
 - 后端逻辑在 `python/mihomo_mgr/`；nginxRouter 通过子模块路径复用同一代码。
-- 订阅与环境变量写入 **`env/.env.mihomo.local`**（独立运行时相对本仓库根目录；嵌入 nginxRouter 时仍使用主仓 `env/.env.mihomo.local`）。
+- 订阅与环境变量写入 **`env/.env.mihomo.local`**（本仓根目录，与 `conf/`、`bin/` 同级；模板见 `env/.env.example`）。若仍存在主仓旧路径 `nginxRouter/env/.env.mihomo.local`，首次读写会自动复制到本仓 `env/`。
+- CLI Python 依赖：`python/requirements.txt`（可选 `python3 -m venv .venv && .venv/bin/pip install -r python/requirements.txt`）。
 - 默认只监听本机，**无登录**（请勿将端口暴露到公网）。需要与平台一致的管理员鉴权时，请使用 nginxRouter 的 `/proxy`。
 
 开发前端（热更新，API 代理到 8765）：
@@ -188,7 +219,7 @@ curl -s https://api.ipify.org && echo
 
 ## 管理页更新订阅
 
-在 **代理管理 → 代理订阅 → 导入订阅** 中填写名称和完整 Clash / Mihomo YAML 订阅链接，选择直连或通过当前代理下载。可保存多个订阅，每张卡片提供更新、启用及编辑/删除操作。链接保存在 `env/.env.mihomo.local`，YAML 缓存位于 `devtools/mihomo/conf/profiles/`，文件名与订阅名称一致（如 `ikku.yaml`、`paoluz.yaml`），均不提交 GitHub；页面只显示来源域名。
+在 **代理管理 → 代理订阅 → 导入订阅** 中填写名称和完整 Clash / Mihomo YAML 订阅链接，选择直连或通过当前代理下载。可保存多个订阅，每张卡片提供更新、启用及编辑/删除操作。链接保存在 `devtools/mihomo/env/.env.mihomo.local`，YAML 缓存位于 `conf/profiles/`，文件名与订阅名称一致（如 `ikku.yaml`、`paoluz.yaml`），均不提交 GitHub；页面只显示来源域名。
 
 点击卡片的 **更新** 后，平台下载并校验配置。未启用的订阅只更新缓存；当前订阅更新后重载。点击 **启用** 切换代理配置，优先使用缓存，没有缓存时先下载；服务器监听和控制接口设置保留，失败会还原旧配置。当前订阅不可删除，需先启用另一个订阅。代理未运行时仅更新配置文件，启动后生效。
 
