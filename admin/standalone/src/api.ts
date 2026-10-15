@@ -9,8 +9,21 @@ const http = axios.create({
 export interface MihomoDelayItem {
   name: string;
   ok: boolean;
-  delay?: number;
+  delay?: number | null;
+  testedAt?: number;
   message?: string;
+}
+
+export interface MihomoProxyGroup {
+  name: string;
+  now: string;
+  options: string[];
+}
+
+export interface MihomoNodeInfo {
+  type: string;
+  udp: boolean | null;
+  now?: string;
 }
 
 export interface MihomoSubscriptionProfile {
@@ -90,9 +103,9 @@ export const getMihomoProxies = () =>
     main_group: string;
     current: string;
     nodes: string[];
-    groups: { name: string; now: string; options: string[] }[];
+    groups: MihomoProxyGroup[];
     message?: string;
-    node_info?: Record<string, { type: string; udp: boolean | null }>;
+    node_info?: Record<string, MihomoNodeInfo>;
   }>("/mihomo/proxies/").then((r) => r.data);
 
 export const selectMihomoNode = (node: string, group?: string) =>
@@ -115,3 +128,44 @@ export const checkMihomoIp = (params?: { node?: string; group?: string }) =>
 
 export const checkMihomoConnectivity = (targets: string[]) =>
   http.post<{ ok: boolean; items: MihomoConnectivityItem[] }>("/mihomo/connectivity/", { targets }, { timeout: 45000 }).then((r) => r.data);
+
+
+export interface MihomoNetworkSettings {
+  ok: boolean;
+  supported: boolean;
+  desktop: string;
+  mode: "off" | "system" | "other" | "unknown";
+  raw_mode?: string;
+  target: string;
+  addresses: Record<string, string>;
+  matches_target: boolean;
+  message: string;
+}
+
+export const getMihomoNetwork = () =>
+  http.get<MihomoNetworkSettings>("/mihomo/network/").then((r) => r.data);
+
+export const setMihomoNetwork = (mode: "off" | "system") =>
+  http.post<MihomoNetworkSettings>("/mihomo/network/", { mode }, {
+    headers: { "X-Mihomo-Network": "1" },
+    timeout: 60000,
+  }).then((r) => r.data);
+
+
+export type MihomoProxyMode = "rule" | "global" | "direct";
+
+export interface MihomoProxyModeSettings {
+  ok: boolean;
+  mode: MihomoProxyMode;
+  tun_enabled: boolean;
+  global_current: string;
+  global_options: string[];
+}
+
+export const getMihomoProxyMode = () =>
+  http.get<MihomoProxyModeSettings>("/mihomo/proxy-mode/").then((r) => r.data);
+
+export const setMihomoProxyMode = (mode: MihomoProxyMode) =>
+  http.post<MihomoProxyModeSettings>("/mihomo/proxy-mode/", { mode }, {
+    headers: { "X-Mihomo-Network": "1" },
+  }).then((r) => r.data);

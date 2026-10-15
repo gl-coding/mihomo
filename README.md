@@ -46,6 +46,8 @@
 ```
 
 - 后端逻辑在 `python/mihomo_mgr/`；nginxRouter 通过子模块路径复用同一代码。
+- **首页概览**：第一行显示「当前订阅」与「当前节点」两张卡片。订阅卡展示名称、来源、节点数、流量进度、到期日和更新时间，可更新当前订阅或跳转订阅管理；节点卡展示所选策略组对应的节点、协议、UDP 与延迟，并提供「代理组 / 节点」两级可搜索选择器。规则模式可切换查看不同的手动策略组，选节点会立即应用到该组并读取实际结果；全局模式固定 `GLOBAL` 组并可切换其出口，直连模式显示 `DIRECT` 并禁用选择。可测试当前节点延迟，或跳转节点管理。窄屏下卡片上下排列。
+- **网络设置 / 代理模式**：两张卡片分别控制桌面系统代理与 Mihomo 的规则 / 全局 / 直连模式；支持 Linux KDE Plasma / GNOME 系统代理，详见下方「系统代理与系统支持」。
 - 订阅与环境变量写入 **`env/.env.mihomo.local`**（本仓根目录，与 `conf/`、`bin/` 同级；模板见 `env/.env.example`）。若仍存在主仓旧路径 `nginxRouter/env/.env.mihomo.local`，首次读写会自动复制到本仓 `env/`。
 - CLI Python 依赖：`python/requirements.txt`（可选 `python3 -m venv .venv && .venv/bin/pip install -r python/requirements.txt`）。
 - 默认只监听本机，**无登录**（请勿将端口暴露到公网）。需要与平台一致的管理员鉴权时，请使用 nginxRouter 的 `/proxy`。
@@ -205,7 +207,7 @@ curl -s https://api.ipify.org && echo
 
 ### Ubuntu 桌面：通过 `sp` 菜单管理系统代理
 
-在 privspec 的 Ubuntu 环境中，系统代理入口位于 **`~/.privspec/ubuntu/sh/sp.sh`**，由 Ubuntu 包装菜单提供；本仓库的 `run.sh menu` 和独立 Web 管理页不包含这一系统设置入口。
+在 privspec 的 Ubuntu 环境中，命令行系统代理入口位于 **`~/.privspec/ubuntu/sh/sp.sh`**，由 Ubuntu 包装菜单提供。本仓库的 `run.sh menu` 不包含这一系统设置入口；独立 Web 管理页也可通过下述「网络设置」栏目管理。
 
 首次使用或更新脚本后，在 Bash 终端加载菜单：
 
@@ -231,15 +233,40 @@ export MIHOMO_PROXY_PORT=7890
 sp
 ```
 
+### 独立管理页：网络设置
+
+在本机访问 `http://127.0.0.1:8765/`，找到 **网络设置** 栏目：
+
+1. 「网络设置」卡片提供「系统代理 / 虚拟网卡」页签；系统代理开关点击后立即应用，状态以实际系统配置为准。开启前需先启动 Mihomo，关闭后内核仍运行。
+2. 标题旁的刷新按钮可同步外部修改；齿轮打开系统代理详情，显示识别出的桌面、状态及 HTTP / HTTPS / SOCKS 地址。切回浏览器窗口时也会刷新状态。
+3. 当前代理地址与 Mihomo 不一致时，可点击「修复地址」；原先使用 PAC 等其他模式时也会提示。开启系统代理会覆盖当前模式与手动代理地址。
+4. 「虚拟网卡」页签显示从内核读取的 TUN 状态。目前仅展示状态，不提供 TUN 启停，开关为只读。
+
+Web 端使用后端的 **`MIHOMO_HTTP_PROXY`** 作为代理目标，默认 `http://127.0.0.1:7890`，修改该环境变量后需重启管理服务。`sp` 菜单使用的是 `MIHOMO_PROXY_HOST` / `MIHOMO_PROXY_PORT`；自定义端口时请保持两处配置和内核监听一致。
+
+设置修改的是**运行独立管理服务的电脑上、启动服务用户的桌面代理**。请从该用户的 KDE / GNOME 桌面会话中启动管理页。未识别桌面或缺少工具时会显示原因并禁用操作；设置失败会尝试恢复先前配置。接口为 `GET /api/mihomo/network/`（读取）与 `POST /api/mihomo/network/`（应用），仅限独立模式及本机回环请求；Web 不支持的其他系统不会尝试修改设置。
+
+### 代理模式：规则 / 全局 / 直连
+
+独立页参考 [Clash Verge Rev 的首页卡片设计](https://github.com/clash-verge-rev/clash-verge-rev/tree/dev/src/components/home)，将「网络设置」与「代理模式」并排展示，窄屏下上下排列。代理模式点击后立即应用，切换期间会禁用重复操作；失败时重新读取内核实际状态。
+
+| 模式 | 进入 Mihomo 的流量如何转发 |
+|------|---------------------------|
+| 规则 | 按订阅配置中的规则匹配代理节点、策略组或直连 |
+| 全局 | 统一交给 `GLOBAL` 策略组；可在卡片内选择实际出口。若出口为 `DIRECT`，页面会提示流量仍将直连 |
+| 直连 | 通过内核直接连接目标，不经过代理节点 |
+
+系统代理决定应用是否把流量交给 Mihomo，代理模式决定 Mihomo 收到流量后如何转发，两者独立。当前模式通过 Mihomo `/configs` API 读写并验证，接口为 `GET /api/mihomo/proxy-mode/` 与 `POST /api/mihomo/proxy-mode/`（`mode` 为 `rule`、`global` 或 `direct`）。与网络设置接口相同，仅限本机独立站；POST 使用 `X-Mihomo-Network: 1` 请求头。更改只作用于当前运行实例，不改写订阅 YAML；重启内核或重新加载订阅后，应以刷新读取的模式为准。
+
 ### 支持范围
 
-以下范围描述的是 **本项目系统代理脚本**；Mihomo 内核的跨平台能力与桌面系统代理配置是两回事。
+以下范围描述的是 **本项目系统代理功能**（`sp` 菜单及独立管理页）；Mihomo 内核的跨平台能力与桌面系统代理配置是两回事。
 
 | 系统 / 桌面 | 系统代理支持 | 实现与依赖 |
 |-------------|--------------|------------|
 | Ubuntu KDE Plasma | 支持 | 根据 `XDG_CURRENT_DESKTOP` / `DESKTOP_SESSION` 识别 KDE；用 `kwriteconfig6/5`、`kreadconfig6/5`（也兼容无版本号命令）读写当前用户的 `kioslaverc`，通过会话 D-Bus 通知应用重载 |
 | Ubuntu GNOME | 支持 | 使用 `gsettings` 读写 `org.gnome.system.proxy`；需在当前用户的桌面会话中执行 |
-| 其他 Linux 桌面 | 未专门适配 | 非 KDE 分支尝试使用 GNOME 的 `gsettings`；命令成功不代表该桌面或浏览器会采用这些设置 |
+| 其他 Linux 桌面 | 未专门适配 | `sp` 的非 KDE 分支尝试使用 GNOME 的 `gsettings`；命令成功不代表该桌面或浏览器会采用这些设置。Web 仅对识别出的 KDE / GNOME（含 Unity 标识）开放操作 |
 | 无桌面的 Linux / SSH 会话 | 不作为桌面代理使用方式 | 按上文设置 `http_proxy` / `https_proxy`，或为应用显式指定代理；SSH 会话中的设置不能用于确认其他用户桌面的代理状态 |
 | Windows / macOS | 此 Ubuntu 包装脚本未适配 | 需使用对应系统的代理设置或客户端；本目录中附带的内核文件为 Linux amd64 版本 |
 

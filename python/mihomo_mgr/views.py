@@ -36,6 +36,8 @@ __all__ = [
     "mihomo_delay",
     "mihomo_delay_batch",
     "mihomo_ip_check",
+    "mihomo_network",
+    "mihomo_proxy_mode",
     "mihomo_proxies",
     "mihomo_select",
     "mihomo_start",
@@ -223,7 +225,7 @@ def mihomo_proxies(request):
     for name, item in proxies.items():
         if not isinstance(item, dict) or item.get("type") != "Selector":
             continue
-        opts = [n for n in item.get("all") or [] if n not in ("DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE")]
+        opts = [n for n in item.get("all") or [] if isinstance(n, str)]
         groups.append({"name": name, "now": item.get("now", ""), "options": opts})
     groups.sort(key=lambda g: g["name"])
     return Response({
@@ -232,9 +234,9 @@ def mihomo_proxies(request):
         "current": main.get("now", ""),
         "nodes": nodes,
         "node_info": {
-            name: {"type": (proxies.get(name) or {}).get("type", ""),
-                   "udp": (proxies.get(name) or {}).get("udp")}
-            for name in nodes
+            name: {"type": item.get("type", ""), "udp": item.get("udp"),
+                   "now": item.get("now", "")}
+            for name, item in proxies.items() if isinstance(item, dict)
         },
         "groups": groups,
     })
@@ -323,3 +325,55 @@ def mihomo_ip_check(request):
         "synced_groups": payload["synced_groups"],
         "message": payload["message"],
     })
+
+
+@api_view(["GET", "POST"])
+@permission_classes([StandaloneOrAdmin])
+def mihomo_network(request):
+    """只修改运行独立站的本机桌面设置。"""
+    from .network import NetworkError, network_status, set_network_mode
+
+    denied = _local_network_access(request)
+    if denied is not None:
+        return denied
+    if request.method == "GET":
+        return Response({"ok": True, **network_status()})
+    mode = request.data.get("mode")
+    if mode == "system" and not _mihomo_running():
+        return Response({"ok": False, "message": "请先启动 Mihomo，再开启系统代理"}, status=409)
+    try:
+        return Response({"ok": True, **set_network_mode(mode),
+                         "message": "已开启系统代理" if mode == "system" else "已关闭系统代理"})
+    except NetworkError as exc:
+        return Response({"ok": False, "message": str(exc)}, status=400)
+
+
+def _local_network_access(request):
+    import ipaddress
+
+    try:
+        local = ipaddress.ip_address(request.META.get("REMOTE_ADDR", "")).is_loopback
+    except ValueError:
+        local = False
+    if not load_config().standalone or not local:
+        return Response({"ok": False, "message": "网络设置仅限本机独立管理页使用"}, status=403)
+    if request.method == "POST" and request.headers.get("X-Mihomo-Network") != "1":
+        return Response({"ok": False, "message": "请通过本机网络设置页面操作"}, status=403)
+    return None
+
+
+@api_view(["GET", "POST"])
+@permission_classes([StandaloneOrAdmin])
+def mihomo_proxy_mode(request):
+    from .proxy_mode import MODES, ProxyModeError, proxy_mode_status, set_proxy_mode
+
+    denied = _local_network_access(request)
+    if denied is not None:
+        return denied
+    if request.method == "POST" and request.data.get("mode") not in MODES:
+        return Response({"ok": False, "message": "请选择规则、全局或直连模式"}, status=400)
+    try:
+        state = proxy_mode_status() if request.method == "GET" else set_proxy_mode(request.data["mode"])
+        return Response({"ok": True, **state})
+    except ProxyModeError as exc:
+        return Response({"ok": False, "message": str(exc)}, status=503)

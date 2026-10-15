@@ -3,6 +3,8 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("mihomo/proxy-mode/", views.mihomo_proxy_mode),
+    path("mihomo/network/", views.mihomo_network),
     path("mihomo/status/", views.mihomo_status),
     path("mihomo/start/", views.mihomo_start),
     path("mihomo/subscription/", views.mihomo_subscription_get),

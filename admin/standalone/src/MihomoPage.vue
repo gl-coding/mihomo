@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import NetworkSettings from "./NetworkSettings.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Refresh, Connection, Position, Odometer, VideoPlay, Plus, MoreFilled, CircleCheck } from "@element-plus/icons-vue";
+import { Refresh, Connection, Position, Odometer, VideoPlay, Plus, MoreFilled, CircleCheck, Document, ArrowRight, Clock, Guide } from "@element-plus/icons-vue";
 import {
   getMihomoStatus, getMihomoProxies, selectMihomoNode, testMihomoDelay, checkMihomoIp,
   batchMihomoDelay, startMihomo, getMihomoSubscription, saveMihomoSubscription, updateMihomoSubscription,
   activateMihomoSubscription, deleteMihomoSubscription, checkMihomoConnectivity,
-  type MihomoDelayItem, type MihomoSubscriptionSettings, type MihomoSubscriptionProfile, type MihomoConnectivityItem,
+  type MihomoProxyGroup, type MihomoNodeInfo, type MihomoProxyModeSettings, type MihomoDelayItem, type MihomoSubscriptionSettings, type MihomoSubscriptionProfile, type MihomoConnectivityItem,
 } from "./api";
 
 const SPEED_CACHE_KEY = "mihomo-delay-results-v1";
@@ -45,7 +46,59 @@ const mainGroup = ref("🔰 选择节点");
 const currentNode = ref("");
 const selectedNode = ref("");
 const nodes = ref<string[]>([]);
-const nodeInfo = ref<Record<string, { type: string; udp: boolean | null }>>({});
+const nodeInfo = ref<Record<string, MihomoNodeInfo>>({});
+const modeState = ref<MihomoProxyModeSettings | null>(null);
+const proxyGroups = ref<MihomoProxyGroup[]>([]);
+const chosenOverviewGroup = ref("");
+const overviewSelectionError = ref("");
+const overviewGroupOptions = computed(() => {
+  if (modeState.value?.mode === "direct") return [];
+  if (modeState.value?.mode === "global") {
+    return proxyGroups.value.filter((group) => group.name === "GLOBAL");
+  }
+  return proxyGroups.value.filter((group) => group.name !== "GLOBAL");
+});
+const overviewSelectedGroup = computed(() => {
+  const groups = overviewGroupOptions.value;
+  return groups.find((group) => group.name === chosenOverviewGroup.value)
+    || groups.find((group) => group.name === mainGroup.value) || groups[0] || null;
+});
+// 全局出口也能在第二行卡片修改，同步该接口读取的实际状态。
+watch(modeState, (state) => {
+  if (!state) return;
+  const global = proxyGroups.value.find((group) => group.name === "GLOBAL");
+  if (global) global.now = state.global_current;
+  if (nodeInfo.value.GLOBAL) nodeInfo.value.GLOBAL.now = state.global_current;
+});
+const refreshToken = ref(0);
+const extraDelayResults = ref<Record<string, MihomoDelayItem>>({});
+const subscriptionLoading = ref(false);
+const subscriptionError = ref("");
+const nodeStateError = ref("");
+const activeSubscription = computed(() => subscription.value?.items.find((row) => row.id === subscription.value?.active_id) || null);
+const overviewNode = computed(() => {
+  if (!running.value || nodeStateError.value) return { name: "", type: "", udp: null, chain: [] as string[] };
+  if (modeState.value?.mode === "direct") return { name: "DIRECT", type: "Direct", udp: null, chain: [] as string[] };
+  const root = overviewSelectedGroup.value?.now || (modeState.value?.mode === "global" ? modeState.value.global_current : currentNode.value);
+  const chain: string[] = [];
+  let name = root;
+  while (name && !chain.includes(name)) {
+    chain.push(name);
+    const next = nodeInfo.value[name]?.now;
+    if (!next || chain.includes(next)) break;
+    name = next;
+  }
+  return { name, type: nodeInfo.value[name]?.type || "", udp: nodeInfo.value[name]?.udp ?? null, chain };
+});
+const overviewGroup = computed(() => modeState.value?.mode === "direct" ? "直连模式" : overviewSelectedGroup.value?.name || mainGroup.value);
+const overviewDelay = computed(() => speedRows.value.find((row) => row.name === overviewNode.value.name) || extraDelayResults.value[overviewNode.value.name]);
+const currentNodeTesting = computed(() => batchLoading.value || singleRowLoading.value.has(overviewNode.value.name));
+const modeLabel = computed(() => modeState.value ? { rule: "规则", global: "全局", direct: "直连" }[modeState.value.mode] : "主策略组");
+const scrollToSection = (id: string) => {
+  const section = document.getElementById(id);
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+  section?.focus({ preventScroll: true });
+};
 
 const directIp = ref("");
 const proxyIp = ref("");
@@ -184,8 +237,12 @@ const handleQuickImport = () => {
 };
 
 const loadSubscription = async () => {
+  if (subscriptionLoading.value) return;
+  subscriptionLoading.value = true;
+  subscriptionError.value = "";
   try { subscription.value = await getMihomoSubscription(); }
-  catch { ElMessage.error("读取订阅设置失败"); }
+  catch { subscriptionError.value = "读取订阅设置失败"; ElMessage.error(subscriptionError.value); }
+  finally { subscriptionLoading.value = false; }
 };
 
 const openAddSubscription = () => {
@@ -340,6 +397,7 @@ const persistSpeedCache = () => {
 
 const clearSpeedCache = () => {
   speedSortOrder.value = [];
+  extraDelayResults.value = {};
   try { localStorage.removeItem(SPEED_CACHE_KEY); } catch { /* ignore */ }
 };
 
@@ -371,6 +429,7 @@ const runStartMihomo = async () => {
 
 const loadAll = async () => {
   loading.value = true;
+  nodeStateError.value = "";
   try {
     const st = await getMihomoStatus();
     running.value = st.running;
@@ -379,17 +438,23 @@ const loadAll = async () => {
       ElMessage.warning(st.message || "Mihomo 未运行");
       nodes.value = [];
       speedRows.value = [];
+      currentNode.value = "";
+      nodeInfo.value = {};
+      proxyGroups.value = [];
       return;
     }
     const px = await getMihomoProxies();
     if (!px.ok) {
-      ElMessage.error(px.message || "读取节点失败");
+      nodeStateError.value = px.message || "读取节点失败";
+      ElMessage.error(nodeStateError.value);
       return;
     }
     mainGroup.value = px.main_group;
     currentNode.value = px.current;
     nodes.value = px.nodes;
     nodeInfo.value = px.node_info || {};
+    proxyGroups.value = px.groups;
+    if (!px.groups.some((group) => group.name === chosenOverviewGroup.value)) chosenOverviewGroup.value = px.main_group;
     if (!selectedNode.value || !px.nodes.includes(selectedNode.value)) {
       selectedNode.value = px.current;
     }
@@ -406,11 +471,15 @@ const loadAll = async () => {
     }
     persistSpeedCache();
   } catch {
+    nodeStateError.value = "无法读取当前节点，请刷新重试";
     ElMessage.error("加载失败");
   } finally {
     loading.value = false;
+    refreshToken.value += 1;
   }
 };
+
+const refreshPage = () => Promise.allSettled([loadAll(), loadSubscription()]);
 
 const applyNodeByName = async (name: string) => {
   if (!name) return;
@@ -424,6 +493,9 @@ const applyNodeByName = async (name: string) => {
     ElMessage.success(res.message);
     selectedNode.value = name;
     currentNode.value = name;
+    if (nodeInfo.value[mainGroup.value]) nodeInfo.value[mainGroup.value].now = name;
+    const group = proxyGroups.value.find((item) => item.name === mainGroup.value);
+    if (group) group.now = name;
     connectivityResults.value = {};
     proxyIp.value = "";
     proxyIpLabel.value = "";
@@ -434,7 +506,46 @@ const applyNodeByName = async (name: string) => {
   }
 };
 
+const chooseOverviewGroup = (group: string) => {
+  chosenOverviewGroup.value = group;
+  overviewSelectionError.value = "";
+};
+
+const chooseOverviewNode = async (name: string) => {
+  const group = overviewSelectedGroup.value;
+  if (!group || group.now === name || !group.options.includes(name) || applyingNode.value !== null
+      || loading.value || subscriptionBusy.value || modeState.value?.mode === "direct") return;
+  const groupName = group.name;
+  applyingNode.value = name;
+  overviewSelectionError.value = "";
+  try {
+    const result = await selectMihomoNode(name, groupName);
+    if (!result.ok) throw new Error(result.message);
+    connectivityResults.value = {};
+    proxyIp.value = "";
+    proxyIpLabel.value = "";
+    // 切换后读取实际组状态，不将尚未生效的选择显示为当前节点。
+    if (groupName === mainGroup.value) selectedNode.value = name;
+    await loadAll();
+    if (proxyGroups.value.find((item) => item.name === groupName)?.now !== name) {
+      overviewSelectionError.value = "当前组状态已变化，请确认实际选中的节点";
+    } else {
+      ElMessage.success(`已切换 ${groupName} → ${name}`);
+    }
+  } catch (error) {
+    overviewSelectionError.value = apiError(error, "节点切换失败，请重试");
+    await loadAll();
+  } finally {
+    applyingNode.value = null;
+  }
+};
+
+const optionDelay = (name: string) => speedRows.value.find((row) => row.name === name) || extraDelayResults.value[name];
+
 const patchRow = (name: string, patch: Partial<MihomoDelayItem>, opts?: { persist?: boolean }) => {
+  if (!speedRows.value.some((row) => row.name === name)) {
+    extraDelayResults.value[name] = { name, ok: false, ...extraDelayResults.value[name], ...patch, testedAt: Date.now() };
+  }
   speedRows.value = speedRows.value.map((r) => (r.name === name ? {
     ...r, ...patch, testedAt: patch.ok !== undefined || patch.delay !== undefined ? Date.now() : r.testedAt,
   } : r));
@@ -472,6 +583,12 @@ const testOneRow = async (row: MihomoDelayItem) => {
   } finally {
     singleRowLoading.value.delete(row.name);
   }
+};
+
+const testCurrentNode = () => {
+  const name = overviewNode.value.name;
+  if (!name || name === "DIRECT" || name === "REJECT") return;
+  void testOneRow(overviewDelay.value || { name, ok: false });
 };
 
 const pickNode = (name: string) => {
@@ -538,7 +655,7 @@ onMounted(() => { loadAll(); loadSubscription(); });
         <el-button v-if="!running" type="success" :icon="VideoPlay" :loading="startLoading" @click="runStartMihomo">
           启动 Mihomo
         </el-button>
-        <el-button :icon="Refresh" :loading="loading" @click="loadAll">刷新</el-button>
+        <el-button :icon="Refresh" :loading="loading" @click="refreshPage">刷新</el-button>
       </div>
     </div>
 
@@ -549,7 +666,118 @@ onMounted(() => { loadAll(); loadSubscription(); });
       </template>
     </el-alert>
 
-    <el-card class="mh-subscription" shadow="never">
+    <div class="mh-overview-grid">
+      <section class="mh-overview-card" aria-labelledby="current-subscription-title">
+        <div class="mh-overview-head">
+          <h3 id="current-subscription-title"><el-icon><Document /></el-icon>当前订阅</h3>
+          <div class="mh-overview-tools">
+            <el-button text circle :icon="Refresh" :loading="subscriptionLoading || subscriptionUpdatingId === activeSubscription?.id"
+                       :disabled="subscriptionBusy || subscriptionSaving || subscriptionLoading"
+                       aria-label="更新当前订阅" @click="activeSubscription ? handleUpdateProfile(activeSubscription) : loadSubscription()" />
+            <el-button text :icon="ArrowRight" size="small" @click="scrollToSection('subscriptions')">订阅管理</el-button>
+          </div>
+        </div>
+        <el-skeleton v-if="subscriptionLoading && !subscription" :rows="3" animated />
+        <p v-else-if="subscriptionError" class="mh-fail" role="alert">{{ subscriptionError }}</p>
+        <template v-else-if="activeSubscription">
+          <div class="mh-overview-title-row">
+            <strong class="mh-overview-name" :title="activeSubscription.name">{{ activeSubscription.name }}</strong>
+            <el-tag type="success" size="small" effect="plain">当前配置</el-tag>
+          </div>
+          <p class="mh-overview-source" :title="subscriptionHostname(activeSubscription)">{{ subscriptionHostname(activeSubscription) }}<template v-if="activeSubscription.node_count != null"> · {{ activeSubscription.node_count }} 个节点</template></p>
+          <div class="mh-overview-quota">
+            <span>已用 / 总量</span><strong>{{ subscriptionTrafficText(activeSubscription) }}</strong>
+          </div>
+          <el-progress :percentage="subscriptionTrafficPercent(activeSubscription)" :show-text="false" :stroke-width="6"
+                       :status="subscriptionTrafficPercent(activeSubscription) >= 90 ? 'warning' : undefined" />
+          <div class="mh-overview-footer">
+            <span><el-icon><Clock /></el-icon>{{ formatRelativeUpdated(activeSubscription.updated_at) }}</span>
+            <span>{{ activeSubscription.expire_at == null ? '到期时间未提供' : activeSubscription.expire_at === 0 ? '不限期' : '到期 ' + subscriptionExpireShort(activeSubscription) }}</span>
+          </div>
+        </template>
+        <div v-else class="mh-overview-empty">
+          <strong>尚未启用订阅</strong><p>导入订阅，或在订阅管理中选择一份配置。</p>
+          <el-button size="small" type="primary" plain :icon="Plus" @click="openAddSubscription">导入订阅</el-button>
+        </div>
+      </section>
+
+      <section class="mh-overview-card" aria-labelledby="current-node-title">
+        <div class="mh-overview-head">
+          <h3 id="current-node-title"><el-icon><Connection /></el-icon>当前节点</h3>
+          <div class="mh-overview-tools">
+            <el-button text circle :icon="Odometer" :loading="currentNodeTesting"
+                       :disabled="!running || loading || !overviewNode.name || overviewNode.name === 'DIRECT' || overviewNode.name === 'REJECT' || subscriptionBusy || currentNodeTesting"
+                       aria-label="测试当前节点延迟" @click="testCurrentNode" />
+            <el-button text :icon="ArrowRight" size="small" @click="scrollToSection('nodes')">节点管理</el-button>
+          </div>
+        </div>
+        <el-skeleton v-if="loading && !currentNode" :rows="3" animated />
+        <p v-else-if="nodeStateError" class="mh-fail" role="alert">{{ nodeStateError }}</p>
+        <template v-else-if="running && (overviewNode.name || overviewSelectedGroup)">
+          <div class="mh-overview-node-summary">
+            <div class="mh-overview-node-text">
+              <strong class="mh-overview-name" :title="overviewNode.name">{{ overviewNode.name === 'DIRECT' ? '直连 · DIRECT' : overviewNode.name || '请选择节点' }}</strong>
+              <div class="mh-overview-node-meta">
+                <span v-if="overviewNode.type">{{ overviewNode.type }}</span>
+                <el-tag size="small" effect="plain">{{ modeLabel }}</el-tag>
+                <el-tag v-if="overviewNode.udp" size="small" type="info" effect="plain">UDP</el-tag>
+              </div>
+            </div>
+            <div class="mh-overview-delay-pill" :class="overviewDelay?.ok ? 'latency-' + delayTagType(overviewDelay.delay) : ''" aria-live="polite">
+              <span v-if="currentNodeTesting">测速中…</span>
+              <span v-else-if="overviewNode.name === 'DIRECT'">直连</span>
+              <span v-else-if="overviewDelay?.ok && overviewDelay.delay != null">{{ overviewDelay.delay }}<small>ms</small></span>
+              <span v-else>{{ overviewDelay?.message ? '超时 / 失败' : '未测速' }}</span>
+            </div>
+          </div>
+          <div class="mh-overview-selectors">
+            <fieldset class="mh-overview-field">
+              <legend>代理组</legend>
+              <el-select :model-value="overviewSelectedGroup?.name" filterable class="mh-overview-select"
+                         aria-label="当前节点代理组" :placeholder="modeState?.mode === 'direct' ? '直连模式不使用代理组' : '选择代理组'"
+                         :disabled="loading || subscriptionBusy || applyingNode !== null || modeState?.mode === 'global' || modeState?.mode === 'direct'"
+                         @change="chooseOverviewGroup">
+                <el-option v-for="group in overviewGroupOptions" :key="group.name" :label="group.name" :value="group.name">
+                  <div class="mh-node-option"><span>{{ group.name }}</span><small>{{ group.options.length }} 项</small></div>
+                </el-option>
+              </el-select>
+            </fieldset>
+            <fieldset class="mh-overview-field">
+              <legend>节点</legend>
+              <el-select :model-value="overviewSelectedGroup?.now" filterable class="mh-overview-select"
+                         aria-label="当前代理组节点" :loading="applyingNode !== null" :placeholder="modeState?.mode === 'direct' ? 'DIRECT' : '选择节点'"
+                         :disabled="loading || subscriptionBusy || batchLoading || applyingNode !== null || !overviewSelectedGroup || modeState?.mode === 'direct'"
+                         @change="chooseOverviewNode">
+                <el-option v-for="name in overviewSelectedGroup?.options || []" :key="name" :label="name" :value="name">
+                  <div class="mh-node-option">
+                    <el-icon><Guide v-if="nodeInfo[name]?.now" /><Connection v-else /></el-icon>
+                    <span>{{ name }}</span>
+                    <small v-if="optionDelay(name)?.ok" :class="'latency-' + delayTagType(optionDelay(name)?.delay)">{{ optionDelay(name)?.delay }} ms</small>
+                    <small v-else>{{ nodeInfo[name]?.type || '' }}</small>
+                  </div>
+                </el-option>
+              </el-select>
+            </fieldset>
+          </div>
+          <p v-if="overviewSelectionError" class="mh-overview-selection-error" role="alert">{{ overviewSelectionError }}</p>
+          <p v-if="modeState?.mode === 'global'" class="mh-overview-selection-note">全局模式固定使用 GLOBAL，可直接切换其出口。</p>
+          <p v-else-if="modeState?.mode !== 'direct'" class="mh-overview-selection-note">选择代理组仅切换查看范围；选择节点立即应用到该组。</p>
+          <div class="mh-overview-footer">
+            <span><i class="mh-overview-live-dot" />Mihomo {{ version || '运行中' }}</span>
+            <span class="mh-overview-chain" :title="[overviewGroup, ...overviewNode.chain].join(' → ')">{{ [overviewGroup, ...overviewNode.chain.slice(0, -1)].join(' → ') }}</span>
+          </div>
+        </template>
+        <div v-else class="mh-overview-empty">
+          <strong>{{ running ? '暂无可用节点' : 'Mihomo 未运行' }}</strong>
+          <p>{{ running ? '检查当前订阅与策略组配置。' : '启动 Mihomo 后显示当前节点及延迟。' }}</p>
+          <el-button v-if="!running" size="small" type="success" plain :icon="VideoPlay" :loading="startLoading" @click="runStartMihomo">启动 Mihomo</el-button>
+        </div>
+      </section>
+    </div>
+
+    <NetworkSettings :running="running" :refresh-token="refreshToken" @state-change="modeState = $event" />
+
+    <el-card id="subscriptions" class="mh-subscription" shadow="never" tabindex="-1">
       <template #header>
         <span>代理订阅</span>
       </template>
@@ -708,7 +936,7 @@ onMounted(() => { loadAll(); loadSubscription(); });
       </p>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card id="nodes" shadow="never" tabindex="-1">
       <template #header>
         <div class="mh-table-head">
           <span>节点延迟测速</span>
@@ -749,6 +977,50 @@ onMounted(() => { loadAll(); loadSubscription(); });
 </template>
 
 <style scoped>
+.mh-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mh-overview-card { min-width: 0; display: flex; flex-direction: column; padding: 18px 20px; border: 1px solid #e4e7ed; border-radius: 12px; background: #fff; }
+.mh-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.mh-overview-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; color: #334155; }
+.mh-overview-head h3 .el-icon { color: #64748b; font-size: 18px; }
+.mh-overview-tools { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.mh-overview-title-row { display: flex; align-items: center; gap: 10px; }
+.mh-overview-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1e293b; font-size: 18px; line-height: 1.5; font-weight: 600; }
+.mh-overview-source { margin: 6px 0 20px; color: #94a3b8; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.mh-overview-quota { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: auto 0 10px; color: #64748b; font-size: 12px; }
+.mh-overview-quota strong { color: #475569; font-size: 13px; font-weight: 500; }
+.mh-overview-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; margin-top: 16px; color: #94a3b8; font-size: 11px; line-height: 1.7; }
+.mh-overview-footer > span { display: inline-flex; gap: 5px; align-items: center; }
+.mh-overview-footer .el-icon { font-size: 13px; }
+.mh-overview-node-meta { display: flex; align-items: center; gap: 7px; margin: 9px 0 16px; min-width: 0; }
+.mh-overview-node-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; font-size: 12px; }
+.mh-overview-node-meta .el-tag { flex-shrink: 0; }
+.mh-overview-node-summary { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 12px 14px; border: 1px solid #dbeafe; border-radius: 8px; background: #f4f8ff; }
+.mh-overview-node-text { min-width: 0; flex: 1; }
+.mh-overview-node-text > .mh-overview-name { display: block; font-size: 16px; }
+.mh-overview-node-summary .mh-overview-node-meta { margin: 7px 0 0; }
+.mh-overview-delay-pill { flex-shrink: 0; border: 1px solid currentColor; border-radius: 14px; padding: 3px 9px; color: #94a3b8; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mh-overview-delay-pill small { margin-left: 3px; font-size: 10px; }
+.mh-overview-selectors { display: grid; gap: 10px; margin-top: 14px; }
+.mh-overview-field { min-width: 0; margin: 0; padding: 0 8px 3px; border: 1px solid #dcdfe6; border-radius: 7px; transition: border-color .15s; }
+.mh-overview-field:focus-within { border-color: #3b82f6; }
+.mh-overview-field legend { margin-left: 3px; padding: 0 5px; color: #64748b; font-size: 11px; }
+.mh-overview-select { display: block; width: 100%; }
+.mh-overview-select :deep(.el-select__wrapper) { box-shadow: none !important; background: transparent; padding: 2px 4px 5px; min-height: 30px; }
+.mh-overview-selection-note { margin: 10px 0 0; color: #94a3b8; font-size: 11px; line-height: 1.6; }
+.mh-overview-selection-error { margin: 10px 0 0; color: #dc2626; font-size: 12px; line-height: 1.6; }
+.mh-overview-chain { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mh-node-option { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mh-node-option > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mh-node-option > small { flex-shrink: 0; font-size: 11px; }
+.mh-node-option > .el-icon { color: #94a3b8; flex-shrink: 0; }
+.latency-success { color: #16a34a; } .latency-warning { color: #d97706; } .latency-danger { color: #dc2626; }
+.mh-overview-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+.mh-overview-empty { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 134px; color: #64748b; font-size: 14px; }
+.mh-overview-empty p { margin: 8px 0 14px; color: #94a3b8; font-size: 12px; line-height: 1.7; }
+#subscriptions, #nodes { scroll-margin-top: 16px; }
+@media (max-width: 760px) { .mh-overview-grid { grid-template-columns: 1fr; } }
+@media (max-width: 400px) { .mh-overview-card { padding: 16px 12px; } .mh-overview-head h3 { font-size: 14px; } }
+
 .mh-sub-toolbar {
   display: flex;
   flex-wrap: wrap;
