@@ -53,7 +53,7 @@ mihomo sub list --json            # 嵌套子命令也支持后置 --json
 cd ~/.privspec/common/devtools/mihomo
 ~/.shared_venv/bin/python -m pip install -r python/requirements.txt
 ./run.sh tui
-# 也可通过 sp 打开 Mihomo 代理菜单，再选择交互管理菜单或 Textual / TUI
+# 也可通过 sp → Mihomo 代理 → 全屏 TUI 进入
 ```
 
 本机已安装并验证 Textual 8.2.8。启动脚本优先使用 `MIHOMO_PYTHON` 指定的解释器，其次使用 `~/.shared_venv/bin/python`；公共环境不存在时继续查找原有项目环境和系统 Python。共享环境的依赖锁文件位于 `~/.shared_venv/requirements.lock`。
@@ -270,33 +270,9 @@ curl -s https://api.ipify.org && echo
 
 ## 系统代理与系统支持
 
-### Ubuntu 桌面：通过 `sp` 菜单管理系统代理
+### Ubuntu 桌面：通过全屏 TUI 管理系统代理
 
-在 privspec 的 Ubuntu 环境中，命令行系统代理入口位于 **`~/.privspec/user/ubuntu/sh/sp.sh`**，由 Ubuntu 包装菜单提供。本仓库的 `run.sh menu` 不包含这一系统设置入口；独立 Web 管理页也可通过下述「网络设置」栏目管理。
-
-首次使用或更新脚本后，在 Bash 终端加载菜单：
-
-```bash
-source ~/.privspec/user/ubuntu/sh/sp.sh
-sp
-# 选择 5「Mihomo 代理」
-```
-
-建议先选择 **1「后台启动」**，确认内核运行，再选择 **11「开启系统代理」**。其他相关选项：
-
-| 菜单项 | 作用 |
-|--------|------|
-| 11「开启系统代理」 | 将当前桌面的 HTTP、HTTPS、SOCKS 代理设为默认 `127.0.0.1:7890`，启用手动代理 |
-| 12「关闭系统代理」 | 关闭当前桌面的系统代理；Mihomo 内核仍继续运行 |
-| 13「查看系统代理状态」 | 根据当前桌面读取实际代理设置 |
-
-可在开启前通过环境变量指定地址和端口；该设置只改变桌面代理目标，Mihomo 的监听配置需与之保持一致：
-
-```bash
-export MIHOMO_PROXY_HOST=127.0.0.1
-export MIHOMO_PROXY_PORT=7890
-sp
-```
+`sp` 的 Mihomo 二级菜单只保留全屏 TUI。进入 TUI 的网络设置页可查看或切换当前桌面的系统代理；也可直接使用 `./run.sh system-proxy status|on|off`。命令行 `on/off` 支持 KDE / GNOME，并只修改当前用户桌面会话。启用前先启动 Mihomo，确认系统代理目标与内核监听地址一致。
 
 ### 独立管理页：网络设置
 
@@ -307,7 +283,7 @@ sp
 3. 当前代理地址与 Mihomo 不一致时，可点击「修复地址」；原先使用 PAC 等其他模式时也会提示。开启系统代理会覆盖当前模式与手动代理地址。
 4. 「虚拟网卡」页签显示从内核读取的 TUN 状态。目前仅展示状态，不提供 TUN 启停，开关为只读。
 
-Web 端使用后端的 **`MIHOMO_HTTP_PROXY`** 作为代理目标，默认 `http://127.0.0.1:7890`，修改该环境变量后需重启管理服务。`sp` 菜单使用的是 `MIHOMO_PROXY_HOST` / `MIHOMO_PROXY_PORT`；自定义端口时请保持两处配置和内核监听一致。
+Web 端使用后端的 **`MIHOMO_HTTP_PROXY`** 作为代理目标，默认 `http://127.0.0.1:7890`，修改该环境变量后需重启管理服务。自定义端口时请保持 Web 配置和内核监听一致。
 
 设置修改的是**运行独立管理服务的电脑上、启动服务用户的桌面代理**。请从该用户的 KDE / GNOME 桌面会话中启动管理页。未识别桌面或缺少工具时会显示原因并禁用操作；设置失败会尝试恢复先前配置。接口为 `GET /api/mihomo/network/`（读取）与 `POST /api/mihomo/network/`（应用），仅限独立模式及本机回环请求；Web 不支持的其他系统不会尝试修改设置。
 
@@ -325,7 +301,7 @@ Web 端使用后端的 **`MIHOMO_HTTP_PROXY`** 作为代理目标，默认 `http
 
 ### 支持范围
 
-以下范围描述的是 **本项目系统代理功能**（`sp` 菜单及独立管理页）；Mihomo 内核的跨平台能力与桌面系统代理配置是两回事。
+以下范围描述的是 **本项目系统代理功能**（全屏 TUI、独立管理页和 `system-proxy` CLI）；Mihomo 内核的跨平台能力与桌面系统代理配置是两回事。
 
 | 系统 / 桌面 | 系统代理支持 | 实现与依赖 |
 |-------------|--------------|------------|
