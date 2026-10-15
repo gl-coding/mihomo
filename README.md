@@ -8,16 +8,79 @@
 
 ## 命令行管理（run.sh）
 
-**交互菜单（推荐）**：
+### 安装 `mihomo` 管理命令
+
+在仓库目录执行：
+
+```bash
+./install-cli.sh
+# 默认创建 ~/.local/bin/mihomo → 本仓库 cli.sh
+# 自定义安装目录：./install-cli.sh --bin-dir /your/bin
+```
+
+安装脚本不会覆盖已有同名命令，可重复执行。需将安装目录加入 `PATH`（本机已配置）。入口支持符号链接和任意工作目录，未指定参数时进入 Textual；现有 `run.sh` 的启动行为保持不变。
+
+```bash
+mihomo                            # 进入 Textual
+mihomo tui                        # 显式进入 Textual
+mihomo --help                     # 查看全部子命令
+mihomo status                     # 内核状态与版本
+mihomo start                      # 后台启动；已运行时返回状态
+mihomo groups                     # 列出代理组、当前选择和是否支持手动切换
+mihomo nodes --group '代理组名称'   # 查看指定组的全部节点（包括 DIRECT 等内置策略）
+mihomo select '节点名称' --group '代理组名称'
+mihomo mode                       # 查询当前代理模式
+mihomo mode rule                  # rule / global / direct
+mihomo system-proxy               # 默认查询当前用户桌面系统代理
+mihomo system-proxy on            # 开启，off 关闭，status 查询
+mihomo sub list                   # 订阅管理沿用现有 sub 命令
+mihomo groups --json              # JSON 输出，便于脚本处理
+mihomo --json mode                # --json 也可前置
+mihomo sub list --json            # 嵌套子命令也支持后置 --json
+```
+
+- `groups` 列出手动及自动策略组；自动组标记为只读。`select` 仅允许切换手动 Selector 组，并读取内核状态确认结果；不传 `--group` 时自动解析主策略组。
+- `nodes` 不传 `--group` 时保留原主策略组列表行为。`mode` 不带参数只查询；设置模式不改变系统代理开关。系统代理开关也不改变内核转发模式。
+- `system-proxy` 支持 KDE / GNOME，开启前检查内核是否运行；无可用桌面时返回原因。网络操作无需 Web 服务。
+- 新增管理命令的运行失败在 `--json` 模式返回 `{"ok": false, "message": "…"}` 并以状态码 1 退出；参数语法错误由命令帮助提示并返回状态码 2。
+- 内核可执行文件仍位于 `bin/mihomo`；`mihomo` 命令是本仓库的管理入口。
+
+**Textual 全屏终端管理（推荐）**：
+
+```bash
+cd ~/.privspec/common/devtools/mihomo
+~/.shared_venv/bin/python -m pip install -r python/requirements.txt
+./run.sh tui
+# 也可通过 sp → 5「Mihomo 代理」→ 7「Textual 终端管理」进入
+```
+
+本机已安装并验证 Textual 8.2.8。启动脚本优先使用 `MIHOMO_PYTHON` 指定的解释器，其次使用 `~/.shared_venv/bin/python`；公共环境不存在时继续查找原有项目环境和系统 Python。共享环境的依赖锁文件位于 `~/.shared_venv/requirements.lock`。
+
+界面直接复用 `python/mihomo_mgr` 业务逻辑，通过内核控制 API 工作，**无需启动独立 Web 管理服务**。采用与 Web 页一致的浅灰背景、白色卡片和蓝色强调色，默认进入概览页。顶部显示当前订阅流量、到期时间和当前代理组节点；支持鼠标及键盘，适合本机终端和 SSH：
+
+| 页面 | 功能 |
+|------|------|
+| 概览 | 当前订阅更新 / 导入、当前节点测速与代理组 / 节点选择、系统代理 / 虚拟网卡页签（TUN 实际状态只读）、规则 / 全局 / 直连模式，全局模式直接选择 GLOBAL 出口，以及直连 / 代理出口 IP 和三个站点测试（支持一键验证、单站重测、详情弹窗与清空结果；仅保留概览、节点、订阅三页）；开关与模式按钮点击后立即应用，详情弹框展示实际配置 |
+| 节点 | 左侧选代理组，右侧搜索节点、按名称或延迟排序；Enter 或「应用节点」切换，并读取内核状态确认；全局模式固定 GLOBAL，直连模式禁用选组与节点操作 |
+| 订阅 | 查看流量、到期时间与当前订阅；导入、编辑、更新、启用、删除；链接输入隐藏，删除需确认，当前订阅不可删除 |
+
+常用快捷键：`0` 返回概览，`F2` 切换明暗主题，`1`–`2` 切页（节点、订阅），`g` 聚焦代理组，`n` 聚焦节点，`/` 搜索，`↑↓` 移动，`Enter` 应用节点 / 启用订阅，`r` 刷新，`Tab` 切换控件，`q` / `Ctrl+Q` 退出。输入框内的普通字符用于输入，不触发全局快捷键。
+
+- 状态每 15 秒自动刷新，编辑弹窗及操作期间暂停刷新。首页代理模式选择后立即生效，失败后恢复内核实际状态。
+- 站点测试显式通过当前配置的 Mihomo HTTP 代理请求，不修改节点或策略组。HTTP 401 / 403 / 429 标记为站点受限，不与代理连接失败混淆。结果保存在当前会话；刷新和切换查看代理组时保留，内核启停、代理模式、实际组选择、当前订阅或代理目标改变后清除旧结果。
+- 测速在后台并发执行（最多 4 个），结果逐项更新；「停止测速」停止发起后续请求，已发出的请求等待返回。订阅下载和首页验证不会阻塞界面。
+- 操作进行中阻止重复修改及立即退出，避免后台写入被误认为取消；测速可先停止，再退出。退出界面不会停止 Mihomo，也不会关闭系统代理。
+- 网络设置修改的是运行终端用户的桌面会话；SSH 无桌面会话时，系统代理会显示不可用，其余内核操作仍可使用。
+- 需交互 TTY，非交互调用会给出说明并返回状态码 2。遵循终端的 `NO_COLOR` 设置；建议窗口至少 80×24；窄窗口的网络设置与代理模式卡片上下排列，内容可滚动。
+
+原数字菜单及脚本接口继续保留：
 
 ```bash
 ./run.sh menu
 # 或 ./run.sh ctl
 ```
 
-数字选项覆盖订阅、节点、测速、出口 IP、外网连通性等；非交互子命令仍可用于脚本。
-
-与 Web/API 共用 `python/mihomo_mgr` 逻辑（需 **PyYAML**；在 nginxRouter 内会自动用 `platform/backend/.venv`，也可设 `MIHOMO_PYTHON`）：
+与 Web/API 共用 `python/mihomo_mgr` 逻辑，非交互命令仅需 PyYAML，Textual 在进入 `tui` 时才加载：
 
 ```bash
 ./run.sh status
@@ -34,7 +97,7 @@
 ./run.sh connectivity all         # 仅联通验证 google / chatgpt / ipify
 ```
 
-各命令支持 `--json`。完整子命令：`./run.sh ctl --help`（与 `./run.sh status` 等等价）。
+非交互命令支持 JSON，例如 `mihomo status --json` 或 `./run.sh ctl --json status`，`--json` 可放在子命令前后；TUI 不输出 JSON。完整子命令：`./run.sh ctl --help`（与 `./run.sh status` 等等价）。
 
 ## 独立管理页（不依赖 nginxRouter）
 
@@ -49,7 +112,7 @@
 - **首页概览**：第一行显示「当前订阅」与「当前节点」两张卡片。订阅卡展示名称、来源、节点数、流量进度、到期日和更新时间，可更新当前订阅或跳转订阅管理；节点卡展示所选策略组对应的节点、协议、UDP 与延迟，并提供「代理组 / 节点」两级可搜索选择器。规则模式可切换查看不同的手动策略组，选节点会立即应用到该组并读取实际结果；全局模式固定 `GLOBAL` 组并可切换其出口，直连模式显示 `DIRECT` 并禁用选择。可测试当前节点延迟，或跳转节点管理。窄屏下卡片上下排列。
 - **网络设置 / 代理模式**：两张卡片分别控制桌面系统代理与 Mihomo 的规则 / 全局 / 直连模式；支持 Linux KDE Plasma / GNOME 系统代理，详见下方「系统代理与系统支持」。
 - 订阅与环境变量写入 **`env/.env.mihomo.local`**（本仓根目录，与 `conf/`、`bin/` 同级；模板见 `env/.env.example`）。若仍存在主仓旧路径 `nginxRouter/env/.env.mihomo.local`，首次读写会自动复制到本仓 `env/`。
-- CLI Python 依赖：`python/requirements.txt`（可选 `python3 -m venv .venv && .venv/bin/pip install -r python/requirements.txt`）。
+- CLI / Textual 依赖：`python/requirements.txt`；本机使用 `~/.shared_venv/bin/python -m pip install -r python/requirements.txt` 安装。
 - 默认只监听本机，**无登录**（请勿将端口暴露到公网）。需要与平台一致的管理员鉴权时，请使用 nginxRouter 的 `/proxy`。
 
 开发前端（热更新，API 代理到 8765）：

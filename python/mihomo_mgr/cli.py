@@ -51,8 +51,11 @@ def _emit(data: object, *, json_mode: bool) -> None:
         print(data)
 
 
-def _fail(message: str, code: int = 1) -> None:
-    print(message, file=sys.stderr)
+def _fail(message: str, code: int = 1, *, json_mode: bool = False) -> None:
+    if json_mode:
+        _emit({"ok": False, "message": message}, json_mode=True)
+    else:
+        print(message, file=sys.stderr)
     raise SystemExit(code)
 
 
@@ -89,7 +92,7 @@ def cmd_sub_save(args: argparse.Namespace) -> None:
     try:
         result = save_subscription(payload)
     except SubscriptionError as exc:
-        _fail(str(exc))
+        _fail(str(exc), json_mode=args.json)
     _emit({"ok": True, "message": "订阅设置已保存", **result}, json_mode=args.json)
 
 
@@ -97,7 +100,7 @@ def cmd_sub_update(args: argparse.Namespace) -> None:
     try:
         result = update_subscription(_mihomo_request, args.id)
     except SubscriptionError as exc:
-        _fail(str(exc))
+        _fail(str(exc), json_mode=args.json)
     _emit(result, json_mode=args.json)
     if not result.get("ok", True):
         raise SystemExit(1)
@@ -105,21 +108,21 @@ def cmd_sub_update(args: argparse.Namespace) -> None:
 
 def cmd_sub_activate(args: argparse.Namespace) -> None:
     if not args.id:
-        _fail("请指定订阅 id：sub activate <id>")
+        _fail("请指定订阅 id：sub activate <id>", json_mode=args.json)
     try:
         result = update_subscription(_mihomo_request, args.id, activate=True)
     except SubscriptionError as exc:
-        _fail(str(exc))
+        _fail(str(exc), json_mode=args.json)
     _emit(result, json_mode=args.json)
 
 
 def cmd_sub_delete(args: argparse.Namespace) -> None:
     if not args.id:
-        _fail("请指定订阅 id：sub delete <id>")
+        _fail("请指定订阅 id：sub delete <id>", json_mode=args.json)
     try:
         result = delete_subscription(args.id)
     except SubscriptionError as exc:
-        _fail(str(exc))
+        _fail(str(exc), json_mode=args.json)
     _emit({"ok": True, "message": "订阅已删除", **result}, json_mode=args.json)
 
 
@@ -136,9 +139,18 @@ def print_numbered_nodes(*, main_group: str, current: str, nodes: list[str]) -> 
 
 
 def cmd_nodes(args: argparse.Namespace) -> None:
-    main_group, current, nodes, err = main_selector_state()
-    if err:
-        _fail(err)
+    requested_group = getattr(args, "group", None)
+    if requested_group:
+        main_group = requested_group.strip()
+        code, data = _mihomo_request("GET", "/proxies/" + urllib.parse.quote(main_group, safe=""))
+        if code != 200 or not isinstance(data, dict) or not isinstance(data.get("all"), list):
+            _fail("代理组不存在或无法读取", json_mode=args.json)
+        current = data.get("now", "")
+        nodes = [name for name in data["all"] if isinstance(name, str)]
+    else:
+        main_group, current, nodes, err = main_selector_state()
+        if err:
+            _fail(err, json_mode=args.json)
     out = {
         "ok": True,
         "main_group": main_group,
@@ -152,16 +164,20 @@ def cmd_nodes(args: argparse.Namespace) -> None:
 
 
 def cmd_select(args: argparse.Namespace) -> None:
-    group = (args.group or MAIN_SELECTOR).strip()
+    from .tui_service import EXPECTED_ERRORS, Manager
+
+    if args.group:
+        group = args.group.strip()
+    else:
+        group, _, _, err = main_selector_state()
+        if err:
+            _fail(err, json_mode=args.json)
     node = args.node.strip()
-    path = f"/proxies/{urllib.parse.quote(group, safe='')}"
-    code, data = _mihomo_request("PUT", path, {"name": node})
-    if code in (200, 204):
-        msg = f"已切换 {group} → {node}"
-        _emit({"ok": True, "message": msg, "group": group, "node": node}, json_mode=args.json)
-        return
-    msg = data.get("message", "切换失败") if isinstance(data, dict) else "切换失败"
-    _fail(msg)
+    try:
+        Manager().select(group, node)
+    except EXPECTED_ERRORS as exc:
+        _fail(str(exc), json_mode=args.json)
+    _emit({"ok": True, "message": f"已切换 {group} → {node}", "group": group, "node": node}, json_mode=args.json)
 
 
 def cmd_delay(args: argparse.Namespace) -> None:
@@ -292,7 +308,7 @@ def cmd_connectivity(args: argparse.Namespace) -> None:
         targets = list(CONNECTIVITY_TARGETS)
     for t in targets:
         if t not in CONNECTIVITY_TARGETS:
-            _fail(f"未知目标 {t!r}，可选: {', '.join(CONNECTIVITY_TARGETS)} 或 all")
+            _fail(f"未知目标 {t!r}，可选: {', '.join(CONNECTIVITY_TARGETS)} 或 all", json_mode=args.json)
     items = []
     with ThreadPoolExecutor(max_workers=min(len(targets), 3)) as pool:
         for item in pool.map(_check_connectivity, targets):
@@ -308,10 +324,76 @@ def cmd_connectivity(args: argparse.Namespace) -> None:
         print(f"{item['name']}: {state}{extra} — {item.get('message', '')} ({item.get('elapsed_ms')} ms)")
 
 
+def cmd_groups(args: argparse.Namespace) -> None:
+    code, data = _mihomo_request("GET", "/proxies")
+    if code != 200 or not isinstance(data, dict) or not isinstance(data.get("proxies"), dict):
+        _fail("无法读取代理组，请确认 Mihomo 正在运行", json_mode=args.json)
+    items = []
+    for name, item in data["proxies"].items():
+        if isinstance(item, dict) and isinstance(item.get("all"), list):
+            items.append({"name": name, "type": item.get("type", ""), "current": item.get("now", ""),
+                          "node_count": len(item["all"]), "selectable": item.get("type") == "Selector"})
+    items.sort(key=lambda row: row["name"])
+    if args.json:
+        _emit({"ok": True, "items": items}, json_mode=True)
+    else:
+        for row in items:
+            suffix = "" if row["selectable"] else "（自动策略 / 只读）"
+            print(f"{row['name']} [{row['type']}]  {row['node_count']} 项 → {row['current'] or '—'} {suffix}")
+
+
+def cmd_mode(args: argparse.Namespace) -> None:
+    from .proxy_mode import ProxyModeError, proxy_mode_status, set_proxy_mode
+
+    try:
+        state = set_proxy_mode(args.mode) if args.mode else proxy_mode_status()
+    except ProxyModeError as exc:
+        _fail(str(exc), json_mode=args.json)
+    _emit({"ok": True, **state}, json_mode=args.json)
+
+
+def cmd_system_proxy(args: argparse.Namespace) -> None:
+    from .network import network_status
+    from .tui_service import EXPECTED_ERRORS, Manager
+
+    try:
+        state = network_status() if args.action == "status" else Manager().system_proxy(args.action == "on")
+    except EXPECTED_ERRORS as exc:
+        _fail(str(exc), json_mode=args.json)
+    _emit({"ok": state.get("supported", False), **state}, json_mode=args.json)
+    if not state.get("supported"):
+        raise SystemExit(1)
+
+
+def cmd_start(args: argparse.Namespace) -> None:
+    from .tui_service import EXPECTED_ERRORS, Manager
+
+    try:
+        Manager().start()
+    except EXPECTED_ERRORS as exc:
+        _fail(str(exc), json_mode=args.json)
+    cmd_status(args)
+
+
+def cmd_tui(args: argparse.Namespace) -> None:
+    if args.json:
+        _fail("tui 不支持 --json；请使用 status / nodes / sub 等非交互命令")
+    try:
+        from .tui import run_tui
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.split(".")[0] in ("textual", "rich"):
+            _fail("缺少 Textual，请用当前 CLI 解释器安装 python/requirements.txt；本机推荐 ~/.shared_venv/bin/python -m pip install -r python/requirements.txt")
+        raise
+    run_tui()
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mihomo", description="Mihomo 代理 CLI（订阅 / 节点 / 测速 / 连通性）")
+    parser = argparse.ArgumentParser(prog="mihomo", description="Mihomo 管理 CLI（TUI / 代理组 / 节点 / 订阅 / 网络 / 诊断）")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_tui = sub.add_parser("tui", help="Textual 全屏终端管理（节点 / 订阅 / 网络 / 诊断）")
+    p_tui.set_defaults(func=cmd_tui)
 
     p_status = sub.add_parser("status", help="查询 Mihomo 是否运行及版本")
     p_status.set_defaults(func=cmd_status)
@@ -342,13 +424,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_sub_del.add_argument("id", help="订阅 id")
     p_sub_del.set_defaults(func=cmd_sub_delete)
 
-    p_nodes = sub.add_parser("nodes", help="列出主策略组节点与当前选中")
+    p_groups = sub.add_parser("groups", help="列出代理组、类型、当前节点和是否可手动选择")
+    p_groups.set_defaults(func=cmd_groups)
+
+    p_nodes = sub.add_parser("nodes", help="列出代理组节点与当前选中")
+    p_nodes.add_argument("--group", help="指定代理组，默认主策略组")
     p_nodes.set_defaults(func=cmd_nodes)
 
     p_sel = sub.add_parser("select", help="切换节点")
     p_sel.add_argument("node", help="节点名称")
     p_sel.add_argument("--group", default=None, help=f"策略组（默认 {MAIN_SELECTOR}）")
     p_sel.set_defaults(func=cmd_select)
+
+    p_mode = sub.add_parser("mode", help="查询或切换内核运行模式")
+    p_mode.add_argument("mode", nargs="?", choices=("rule", "global", "direct"))
+    p_mode.set_defaults(func=cmd_mode)
+
+    p_system = sub.add_parser("system-proxy", help="查询或切换 KDE / GNOME 系统代理")
+    p_system.add_argument("action", nargs="?", default="status", choices=("status", "on", "off"))
+    p_system.set_defaults(func=cmd_system_proxy)
+
+    p_start = sub.add_parser("start", help="后台启动 Mihomo；已运行时直接返回状态")
+    p_start.set_defaults(func=cmd_start)
 
     p_delay = sub.add_parser("delay", help="单节点延迟测速")
     p_delay.add_argument("name", help="节点名称")
@@ -383,6 +480,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_conn.set_defaults(func=cmd_connectivity)
 
+    # 让 --json 同时支持前置、后置和嵌套子命令，子级默认值不覆盖父级。
+    def add_json_options(parent):
+        for action in parent._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for child in action.choices.values():
+                    child.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSON")
+                    add_json_options(child)
+    add_json_options(parser)
     return parser
 
 

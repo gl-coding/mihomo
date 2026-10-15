@@ -1,2 +1,4 @@
 # CLI / mihomo_mgr（menu、sub、测速等）
 PyYAML>=6.0.3
+# 全屏终端管理（./run.sh tui）
+textual>=8.2.8,<9

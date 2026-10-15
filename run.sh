@@ -19,10 +19,13 @@ usage() {
   --update-geo [选项]     更新 conf/geo（见 update-geo.sh --help）
 
 交互管理（推荐）:
+  tui                    Textual 全屏管理（节点 / 订阅 / 网络 / 诊断）
   menu | ctl              进入交互菜单（订阅 / 节点 / 测速 / IP / 连通性）
 
 非交互 CLI（脚本用，支持 --json）:
-  ip | verify-all | connectivity | status | sub … | nodes | select | delay-batch …
+  groups | nodes [--group 名称] | select 节点 [--group 名称]
+  mode [rule|global|direct] | system-proxy [status|on|off] | start
+  ip | verify-all | connectivity | status | sub … | delay-batch …
   完整帮助: $(basename "$0") ctl --help
 
   -h, --help              显示此帮助
@@ -116,6 +119,7 @@ _resolve_python() {
   fi
   local candidate
   for candidate in \
+    "$HOME/.shared_venv/bin/python" \
     "$ROOT/.venv/bin/python" \
     "$ROOT/../../platform/backend/.venv/bin/python" \
     "$ROOT/admin/.venv/bin/python"; do
@@ -128,7 +132,7 @@ _resolve_python() {
     echo python3
     return
   fi
-  echo "CLI 需要 PyYAML：$ROOT/.venv 执行 pip install -r python/requirements.txt，或设置 MIHOMO_PYTHON。" >&2
+  echo "CLI 需要 PyYAML：使用 ~/.shared_venv/bin/python -m pip install -r $ROOT/python/requirements.txt，或设置 MIHOMO_PYTHON。" >&2
   exit 1
 }
 
@@ -168,7 +172,7 @@ case "${1:-}" in
     usage
     exit 0
     ;;
-  status|sub|nodes|select|delay|delay-batch|ip|verify-all|connectivity)
+  tui|status|sub|groups|nodes|select|mode|system-proxy|start|delay|delay-batch|ip|verify-all|connectivity)
     _run_cli "$@"
     ;;
   "")

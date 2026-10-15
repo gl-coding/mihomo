@@ -1,0 +1,183 @@
+Screen { background: $background; color: $text; }
+#top-header { height: 3; padding: 0 2; background: $surface; border-bottom: solid $foreground 12%; align-vertical: middle; }
+#brand { width: 1fr; height: 1; color: $text; }
+#header-status { width: 25; height: 1; content-align: right middle; margin-right: 2; }
+#header-refresh { width: 9; height: 1; min-width: 9; border: none; color: $primary; background: transparent; }
+#overview { height: 9; padding: 1 1 0 1; }
+.overview-card { width: 1fr; height: 100%; border: round $foreground 12%; background: $surface; padding: 0 1; margin: 0 1 0 0; }
+.card-heading { height: 1; margin-bottom: 0; }
+.card-heading Label { width: 1fr; color: $text-muted; text-style: bold; }
+.card-heading Button { height: 1; }
+#subscription-summary { height: 3; margin-top: 0; }
+#node-summary { height: 3; background: $primary 5%; padding: 0 1; }
+#quota { height: 1; }
+#quota Bar { width: 1fr; }
+.card-footnote { color: $text-muted; height: 1; }
+#subscription-footer, #node-footer { height: 1; }
+TabbedContent { height: 1fr; padding: 0 1; }
+TabbedContent > Tabs { background: transparent; }
+Tab { background: transparent; color: $text-muted; padding: 0 2; }
+Tab.-active { color: $primary; text-style: bold; }
+Underline > .underline--bar { color: $primary; }
+TabbedContent ContentSwitcher { height: 1fr; }
+TabPane { height: 1fr; padding: 1 0 0 0; }
+#dashboard-scroll { height: 1fr; padding: 0 1 1 0; }
+#dashboard-controls { height: 12; }
+.dashboard-card { width: 1fr; height: 100%; border: round $foreground 12%; background: $surface; padding: 0 1; margin-right: 1; }
+.card-title { text-style: bold; height: 1; margin-bottom: 1; color: $text; }
+#home-system-status { height: 1; color: $text-muted; }
+.home-switch-row { height: 3; align-vertical: middle; background: $primary 5%; }
+.home-switch-row Label { width: 1fr; padding-left: 1; }
+.home-switch-row Switch { margin-right: 1; }
+#home-mode-buttons { height: 3; }
+#home-mode-buttons Button { width: 1fr; min-width: 7; height: 3; margin-right: 1; }
+#home-mode-description { height: 3; border-left: solid $primary; padding: 0 1; background: $primary 5%; margin-top: 1; color: $text-muted; }
+#home-global-status { margin-top: 0; }
+.dashboard-section-heading { height: 2; align-vertical: middle; }
+.dashboard-section-heading Label { width: 1fr; text-style: bold; }
+.dashboard-section-heading Button { height: 1; margin-left: 1; }
+#home-check-grid { grid-size: 5; grid-columns: 1fr 1fr 1fr 1fr 1fr; grid-rows: 6; grid-gutter: 0 1; height: 6; margin-bottom: 1; }
+.check-card { height: 6; border: round $foreground 12%; background: $surface; padding: 0 1; }
+#home-ip-proxy { border: round $primary 35%; background: $primary 5%; }
+.check-card-label { height: 1; color: $text-muted; }
+.check-card Static { height: 1; }
+#home-ip-value-direct, #home-ip-value-proxy { height: 2; }
+.check-card Button { height: 1; min-width: 6; }
+#node-browser { height: 1fr; }
+#group-panel { width: 27%; min-width: 22; margin-right: 1; border: round $foreground 12%; background: $surface; }
+#group-panel .section-label { padding-left: 1; }
+#node-panel { width: 1fr; border: round $foreground 12%; background: $surface; }
+DataTable { height: 1fr; background: $surface; scrollbar-size: 1 1; }
+DataTable > .datatable--header { background: $panel; color: $text-muted; text-style: bold; }
+DataTable > .datatable--odd-row { background: $surface; }
+DataTable > .datatable--even-row { background: $panel; }
+DataTable > .datatable--cursor { background: $primary 16%; color: $text; text-style: bold; }
+DataTable:focus > .datatable--cursor { background: $primary 22%; color: $text; }
+DataTable > .datatable--hover { background: $primary 8%; color: $text; }
+.section-label { text-style: bold; color: $text; height: auto; margin: 1 0; }
+.toolbar { height: 3; }
+.toolbar Button { min-width: 10; margin-right: 1; }
+Button { background: $surface; color: $text; border: round $foreground 12%; }
+Button:hover { background: $primary 8%; border: round $primary 40%; }
+Button.-primary { background: $primary; color: white; border: round $primary; }
+Button.-success { background: $success; color: white; border: round $success; }
+Button.-error { background: $error 10%; color: $error; border: round $error 25%; }
+Button:disabled { background: $panel; color: $text-muted 55%; border: round $foreground 6%; }
+Button.text-button { height: 1; min-width: 8; border: none; background: transparent; color: $primary; padding: 0; }
+Button.text-button:disabled { color: $text-muted 40%; }
+Button.text-button:hover { text-style: underline; background: $primary 7%; }
+Input, Select { background: $surface; }
+Input { border: tall $foreground 15%; }
+Input:focus { border: round $primary; }
+#node-search { width: 1fr; margin-right: 1; }
+#node-sort { width: 18; }
+#group-status { height: 1; color: $text-muted; padding-left: 1; }
+#bottom-bar { height: 3; padding: 0 2; background: $surface; }
+#status-line { width: 1fr; height: 1; color: $text-muted; }
+#start-core { margin-left: 1; }
+.core-running #bottom-bar { height: 1; }
+#profiles-table { height: 1fr; border: round $foreground 12%; }
+.switch-row { height: 3; align-vertical: middle; }
+.switch-row Label { width: auto; margin: 0 2 0 0; }
+.switch-row Switch { margin-right: 2; }
+.muted { color: $text-muted; height: auto; margin-bottom: 1; }
+Footer { background: $surface; color: $text-muted; }
+Footer > .footer--key { color: $primary; background: $surface; }
+ModalScreen { align: center middle; background: $background 75%; }
+.dialog { width: 64; max-width: 96%; height: auto; max-height: 96%; padding: 1 2; border: round $primary; background: $surface; overflow-y: auto; }
+.dialog Static { height: auto; margin-bottom: 1; }
+.dialog Label { height: auto; }
+.dialog Input { margin-bottom: 1; }
+.dialog-title { text-style: bold; color: $primary; margin-bottom: 1; }
+.dialog .toolbar { margin-top: 1; align-horizontal: right; }
+.narrow #group-panel { width: 25%; min-width: 18; }
+.narrow .toolbar Button { min-width: 8; margin-right: 0; padding: 0 1; }
+.narrow #home-check-grid { grid-size: 3; grid-columns: 1fr 1fr 1fr; grid-rows: 6 6; height: 12; }
+.narrow #dashboard-controls { height: 13; }
+.narrow #home-mode-description { height: 4; }
+.compact #top-header { height: 2; border-bottom: none; }
+.compact #overview { height: 6; padding-top: 0; }
+.compact #subscription-summary, .compact #node-summary { height: 2; }
+.compact #subscription-footer { display: none; }
+
+Button.text-button:focus { background: $primary 8%; color: $primary; border: none; text-style: underline; }
+#header-refresh:focus { background: $primary 8%; border: none; }
+
+
+#overview { height: 10; }
+#node-summary { height: 2; }
+#overview-selectors { height: 3; }
+#overview-selectors Select { width: 1fr; min-width: 0; }
+#overview-selectors Select:first-child { margin-right: 1; }
+#node-footer { display: none; }
+#home-global-node { height: 3; }
+#home-mode-card { overflow-y: auto; }
+.compact #node-summary { display: none; }
+.compact #overview { height: 7; }
+.narrow #dashboard-controls { layout: vertical; height: 26; }
+.narrow .dashboard-card { width: 100%; height: 13; margin-bottom: 1; }
+.narrow .card-heading Button { min-width: 4; }
+.narrow .switch-row Label { margin-right: 1; }
+.narrow .switch-row Switch { margin-right: 0; }
+.narrow .switch-row Button { min-width: 12; width: 14; padding: 0 1; }
+
+.global-mode #dashboard-controls { height: 15; }
+.global-mode.narrow #dashboard-controls { height: 29; }
+.global-mode.narrow #home-mode-card { height: 16; }
+
+Button { height: 3; padding: 0 2; text-style: none; border: round $foreground 16%; }
+Button:focus { border: round $primary; background: $primary 9%; text-style: bold; }
+Button.-primary:focus { background: $accent; color: white; border: round $accent; }
+Button.-primary:hover { background: $accent; color: white; border: round $accent; }
+Button.text-button { padding: 0 1; min-width: 6; background: $primary 6%; color: $primary; margin-left: 1; }
+Button.text-button:hover, Button.text-button:focus { background: $primary 16%; text-style: bold; }
+.card-heading Button { margin-left: 1; }
+#home-mode-buttons { background: $panel; }
+#home-mode-buttons Button { margin-right: 1; padding: 0 1; }
+#home-mode-buttons Button.-primary { text-style: bold; }
+.dashboard-section-heading { height: 4; align-vertical: middle; }
+.dashboard-section-heading Button { height: 3; min-width: 8; padding: 0 1; margin-left: 1; }
+.site-actions { height: 1; }
+.site-actions Button { width: 1fr; min-width: 4; height: 1; padding: 0; margin: 0 1 0 0; }
+.narrow .dashboard-section-heading { height: 7; layout: grid; grid-size: 4; grid-columns: 1fr 1fr 1fr 1fr; grid-rows: 2 3; }
+.narrow .dashboard-section-heading Label { column-span: 4; }
+.narrow .dashboard-section-heading Button { width: 1fr; margin: 0 1 0 0; }
+
+#header-refresh { padding: 0; }
+
+/* Single terminal row buttons keep actions compact at every window size. */
+Button, Button:hover, Button:focus,
+Button.-primary, Button.-primary:hover, Button.-primary:focus,
+Button.-success, Button.-error, Button:disabled {
+    height: 1;
+    min-width: 6;
+    width: auto;
+    padding: 0 1;
+    border: none;
+}
+.toolbar Button { min-width: 8; margin-right: 1; }
+#home-mode-buttons { height: 1; background: transparent; }
+#home-mode-buttons Button { width: auto; min-width: 8; height: 1; padding: 0 2; margin-right: 1; }
+.dashboard-section-heading { height: 2; }
+.dashboard-section-heading Button { height: 1; min-width: 6; width: auto; padding: 0 1; }
+.narrow .dashboard-section-heading { height: 3; grid-rows: 1 1; }
+.narrow .dashboard-section-heading Button { width: auto; height: 1; }
+.site-actions Button { width: auto; min-width: 4; padding: 0 1; }
+.narrow .switch-row Button { width: auto; min-width: 8; padding: 0 1; }
+#header-refresh { padding: 0; }
+
+#home-mode-buttons Button { width: 1fr; min-width: 0; padding: 0 1; margin: 0 1 0 0; }
+#home-mode-buttons Button:last-child { margin-right: 0; }
+
+.home-switch-row { height: 1; }
+.home-switch-row Switch { height: 1; border: none; padding: 0; margin: 0 1 0 0; }
+
+#home-network-heading { height: 2; }
+#home-network-heading .card-title { width: 1fr; }
+#home-network-desktop { width: auto; max-width: 16; height: 1; color: $text-muted; }
+#home-network-heading Button { min-width: 6; }
+#home-network-tabs { height: 1; }
+#home-network-tabs Button { width: 1fr; min-width: 0; padding: 0 1; margin-right: 1; height: 1; }
+#home-network-tabs Button:last-child { margin-right: 0; }
+#home-system-status { height: 3; margin-top: 1; padding: 0 1; border-left: solid $primary; background: $primary 5%; }
+#home-proxy-target, #home-tun-status { padding-left: 1; }
