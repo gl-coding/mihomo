@@ -201,6 +201,67 @@ curl -s https://api.ipify.org && echo
 
 管理台：**代理管理** → 需 Mihomo 已启动且 `9090` 可连。
 
+## 系统代理与系统支持
+
+### Ubuntu 桌面：通过 `sp` 菜单管理系统代理
+
+在 privspec 的 Ubuntu 环境中，系统代理入口位于 **`~/.privspec/ubuntu/sh/sp.sh`**，由 Ubuntu 包装菜单提供；本仓库的 `run.sh menu` 和独立 Web 管理页不包含这一系统设置入口。
+
+首次使用或更新脚本后，在 Bash 终端加载菜单：
+
+```bash
+source ~/.privspec/ubuntu/sh/sp.sh
+sp
+# 选择 5「Mihomo 代理」
+```
+
+建议先选择 **1「后台启动」**，确认内核运行，再选择 **11「开启系统代理」**。其他相关选项：
+
+| 菜单项 | 作用 |
+|--------|------|
+| 11「开启系统代理」 | 将当前桌面的 HTTP、HTTPS、SOCKS 代理设为默认 `127.0.0.1:7890`，启用手动代理 |
+| 12「关闭系统代理」 | 关闭当前桌面的系统代理；Mihomo 内核仍继续运行 |
+| 13「查看系统代理状态」 | 根据当前桌面读取实际代理设置 |
+
+可在开启前通过环境变量指定地址和端口；该设置只改变桌面代理目标，Mihomo 的监听配置需与之保持一致：
+
+```bash
+export MIHOMO_PROXY_HOST=127.0.0.1
+export MIHOMO_PROXY_PORT=7890
+sp
+```
+
+### 支持范围
+
+以下范围描述的是 **本项目系统代理脚本**；Mihomo 内核的跨平台能力与桌面系统代理配置是两回事。
+
+| 系统 / 桌面 | 系统代理支持 | 实现与依赖 |
+|-------------|--------------|------------|
+| Ubuntu KDE Plasma | 支持 | 根据 `XDG_CURRENT_DESKTOP` / `DESKTOP_SESSION` 识别 KDE；用 `kwriteconfig6/5`、`kreadconfig6/5`（也兼容无版本号命令）读写当前用户的 `kioslaverc`，通过会话 D-Bus 通知应用重载 |
+| Ubuntu GNOME | 支持 | 使用 `gsettings` 读写 `org.gnome.system.proxy`；需在当前用户的桌面会话中执行 |
+| 其他 Linux 桌面 | 未专门适配 | 非 KDE 分支尝试使用 GNOME 的 `gsettings`；命令成功不代表该桌面或浏览器会采用这些设置 |
+| 无桌面的 Linux / SSH 会话 | 不作为桌面代理使用方式 | 按上文设置 `http_proxy` / `https_proxy`，或为应用显式指定代理；SSH 会话中的设置不能用于确认其他用户桌面的代理状态 |
+| Windows / macOS | 此 Ubuntu 包装脚本未适配 | 需使用对应系统的代理设置或客户端；本目录中附带的内核文件为 Linux amd64 版本 |
+
+KDE 开启时设置 `ProxyType=1`，关闭时设置 `ProxyType=0`；HTTP、HTTPS 和 SOCKS 地址均写入 `~/.config/kioslaverc`（使用自定义 XDG 配置目录时以实际目录为准）。GNOME 开启时设置 `mode=manual`，关闭时设置 `mode=none`。设置针对当前用户，会保留到下次修改；开启操作会覆盖已有的手动代理地址，关闭操作不会恢复之前的 PAC 或代理模式。
+
+### 生效范围与 Chrome 排查
+
+- 系统代理供遵循桌面代理设置的浏览器和应用使用，不会强制接管整台机器的所有流量，也不会自动开启 TUN。
+- 终端工具按各自规则读取 `http_proxy` / `https_proxy` 等环境变量；关闭桌面系统代理不会清除终端变量。
+- 开启系统代理不会自动启动 Mihomo。停止 Mihomo 前可先关闭系统代理，避免应用继续连接已停止的本地端口。
+- Chrome 若配置了代理扩展、策略或启动参数，可能覆盖桌面设置。修改后先刷新页面；仍失败时完全退出 Chrome 后重新打开。
+- 在 KDE 桌面上，应确认 KDE 的 `ProxyType`，仅看到 GNOME 的 `mode=manual` 无法证明 KDE 系统代理已开启。菜单 13 会按桌面选择对应配置。
+
+可以先显式通过本机代理测试 Google，区分代理线路与浏览器设置问题：
+
+```bash
+curl --noproxy '' --proxy http://127.0.0.1:7890 \
+  -I --connect-timeout 8 --max-time 20 https://www.google.com
+```
+
+若目标站点返回 HTTP 200，而 Chrome 仍显示“无法访问此网站”，继续检查浏览器使用的代理配置及页面底部的具体错误码。
+
 ## 更新 Geo 规则库（与订阅分开）
 
 含 `GEOSITE` / `GEOIP` 的订阅依赖 `conf/geo/`，**不会在 Web「更新订阅」时自动拉取**（文件大、耗时长、与机场无关）。
