@@ -53,7 +53,7 @@ mihomo sub list --json            # 嵌套子命令也支持后置 --json
 cd ~/.privspec/common/devtools/mihomo
 ~/.shared_venv/bin/python -m pip install -r python/requirements.txt
 ./run.sh tui
-# 也可通过 sp → 5「Mihomo 代理」→ 7「Textual 终端管理」进入
+# 也可通过 sp 打开 Mihomo 代理菜单，再选择交互管理菜单或 Textual / TUI
 ```
 
 本机已安装并验证 Textual 8.2.8。启动脚本优先使用 `MIHOMO_PYTHON` 指定的解释器，其次使用 `~/.shared_venv/bin/python`；公共环境不存在时继续查找原有项目环境和系统 Python。共享环境的依赖锁文件位于 `~/.shared_venv/requirements.lock`。
