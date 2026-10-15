@@ -4,12 +4,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ADMIN_DIR = REPO_ROOT / "admin"
 DIST_DIR = ADMIN_DIR / "standalone" / "dist"
+ASSETS_DIR = DIST_DIR / "assets"
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "mihomo-standalone-dev-only")
 DEBUG = os.environ.get("MIHOMO_ADMIN_DEBUG", "true").lower() in ("1", "true", "yes")
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("MIHOMO_ADMIN_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
 
 INSTALLED_APPS = [
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
     "django.contrib.staticfiles",
     "rest_framework",
 ]
@@ -30,7 +33,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/assets/"
-STATICFILES_DIRS = [DIST_DIR] if DIST_DIR.is_dir() else []
+STATICFILES_DIRS = [ASSETS_DIR] if ASSETS_DIR.is_dir() else []
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
