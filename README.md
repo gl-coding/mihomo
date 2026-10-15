@@ -207,12 +207,12 @@ curl -s https://api.ipify.org && echo
 
 ### Ubuntu 桌面：通过 `sp` 菜单管理系统代理
 
-在 privspec 的 Ubuntu 环境中，命令行系统代理入口位于 **`~/.privspec/ubuntu/sh/sp.sh`**，由 Ubuntu 包装菜单提供。本仓库的 `run.sh menu` 不包含这一系统设置入口；独立 Web 管理页也可通过下述「网络设置」栏目管理。
+在 privspec 的 Ubuntu 环境中，命令行系统代理入口位于 **`~/.privspec/user/ubuntu/sh/sp.sh`**，由 Ubuntu 包装菜单提供。本仓库的 `run.sh menu` 不包含这一系统设置入口；独立 Web 管理页也可通过下述「网络设置」栏目管理。
 
 首次使用或更新脚本后，在 Bash 终端加载菜单：
 
 ```bash
-source ~/.privspec/ubuntu/sh/sp.sh
+source ~/.privspec/user/ubuntu/sh/sp.sh
 sp
 # 选择 5「Mihomo 代理」
 ```
