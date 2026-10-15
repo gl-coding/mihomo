@@ -20,6 +20,8 @@
 
 安装脚本不会覆盖已有同名命令，可重复执行。需将安装目录加入 `PATH`（本机已配置）。入口支持符号链接和任意工作目录，未指定参数时进入 Textual；现有 `run.sh` 的启动行为保持不变。
 
+> 该「符号链接到用户命令目录」的通用做法，以及其他仓库工具如何套用，见 [`common/spec/07-development-toolkit.md`](../../spec/07-development-toolkit.md) 的「仓库工具安装到用户命令目录」一节。
+
 ```bash
 mihomo                            # 进入 Textual
 mihomo tui                        # 显式进入 Textual
