@@ -76,7 +76,6 @@ Input:focus { border: round $primary; }
 #status-line { width: 1fr; height: 1; color: $text-muted; }
 #start-core { margin-left: 1; }
 .core-running #bottom-bar { height: 1; }
-#profiles-table { height: 1fr; border: round $foreground 12%; }
 .switch-row { height: 3; align-vertical: middle; }
 .switch-row Label { width: auto; margin: 0 2 0 0; }
 .switch-row Switch { margin-right: 2; }
@@ -181,3 +180,18 @@ Button.-success, Button.-error, Button:disabled {
 #home-network-tabs Button:last-child { margin-right: 0; }
 #home-system-status { height: 3; margin-top: 1; padding: 0 1; border-left: solid $primary; background: $primary 5%; }
 #home-proxy-target, #home-tun-status { padding-left: 1; }
+
+#profiles-scroll { height: 1fr; }
+#profiles-grid { layout: grid; grid-size: 2; grid-columns: 1fr 1fr; grid-rows: auto; grid-gutter: 1 2; height: auto; }
+.profile-card { height: 12; padding: 1 2; border: round $foreground 16%; background: $surface; }
+.profile-card.active-profile { border: round $primary; background: $primary 5%; }
+.profile-card:focus, .profile-card:focus-within { border: round $primary; }
+.profile-name { height: 1; text-style: bold; }
+.profile-meta, .profile-foot { height: 1; color: $text-muted; }
+.profile-quota { height: 1; margin-top: 1; }
+.profile-progress { height: 1; }
+.profile-progress Bar { width: 1fr; }
+.profile-actions { height: 1; margin-top: 1; }
+.profile-actions Button { margin-right: 1; min-width: 4; padding: 0 1; }
+#profiles-empty { height: auto; padding: 2; color: $text-muted; }
+.narrow #profiles-grid { grid-size: 1; grid-columns: 1fr; }

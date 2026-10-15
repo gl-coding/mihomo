@@ -4,9 +4,9 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from textual.widgets import DataTable, Input, Select, Switch, TabbedContent
+from textual.widgets import Button, DataTable, Input, Select, Switch, TabbedContent
 
-from mihomo_mgr.tui import MihomoApp, SubscriptionScreen, ConfirmScreen
+from mihomo_mgr.tui import MihomoApp, SubscriptionScreen, ConfirmScreen, SubscriptionCard
 from mihomo_mgr.tui_service import Manager, ManagerError, resolve_node
 
 
@@ -188,21 +188,50 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(manager.calls[0][0:2], ("subscription", "save"))
             self.assertEqual(len(manager.calls), 1)
 
+    async def test_subscription_cards_layout_and_scoped_actions(self):
+        for width in (80, 110):
+            with self.subTest(width=width):
+                manager = FakeManager()
+                app = MihomoApp(manager)
+                async with app.run_test(size=(width, 38)) as pilot:
+                    await self.mount(app, pilot)
+                    await pilot.press("2")
+                    cards = list(app.query(SubscriptionCard))
+                    self.assertEqual(len(cards), 2)
+                    if width == 80:
+                        self.assertEqual(cards[0].region.x, cards[1].region.x)
+                        self.assertGreater(cards[1].region.y, cards[0].region.y)
+                    else:
+                        self.assertEqual(cards[0].region.y, cards[1].region.y)
+                    self.assertTrue(cards[0].has_class("active-profile"))
+                    self.assertNotIn("/private", str(cards[0].query_one(".profile-meta").render()))
+                    update = next(b for b in cards[1].query(Button) if b.name == "update")
+                    app.query_one("#profiles-scroll").scroll_end(animate=False)
+                    await pilot.pause()
+                    await pilot.click(update)
+                    await self.mount(app, pilot)
+                    self.assertEqual(manager.calls[0], ("subscription", "update", "two", None))
+                    cards[1].focus()
+                    await pilot.press("enter")
+                    await self.mount(app, pilot)
+                    self.assertEqual(manager.calls[-1], ("subscription", "activate", "two", None))
+
     async def test_delete_requires_confirmation_and_active_subscription_is_protected(self):
         manager = FakeManager()
         app = MihomoApp(manager)
         async with app.run_test(size=(110, 38)) as pilot:
             await self.mount(app, pilot)
             await pilot.press("2")
-            self.assertTrue(app.query_one("#sub-delete").disabled)
-            table = app.query_one("#profiles-table", DataTable)
-            table.focus()
+            cards = list(app.query(SubscriptionCard))
+            self.assertTrue(next(button for button in cards[0].query(Button) if button.name == "delete").disabled)
+            cards[0].focus()
             await pilot.press("down")
-            await pilot.click("#sub-delete")
+            self.assertTrue(cards[1].has_focus)
+            await pilot.click(next(button for button in cards[1].query(Button) if button.name == "delete"))
             self.assertIsInstance(app.screen, ConfirmScreen)
             await pilot.click("#confirm-no")
             self.assertEqual(manager.calls, [])
-            await pilot.click("#sub-delete")
+            await pilot.click(next(button for button in cards[1].query(Button) if button.name == "delete"))
             await pilot.click("#confirm-yes")
             await self.mount(app, pilot)
             self.assertEqual(manager.calls[0][0:3], ("subscription", "delete", "two"))

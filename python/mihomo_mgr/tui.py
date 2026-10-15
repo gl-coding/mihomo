@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
+from textual.message import Message
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.theme import Theme
@@ -21,6 +22,65 @@ from .subscription import SubscriptionError
 from .tui_service import EXPECTED_ERRORS, Manager, expiry, resolve_node, traffic
 
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"}
+
+
+class SubscriptionCard(Vertical, can_focus=True):
+    """A subscription summary with actions scoped to this profile."""
+    class Action(Message):
+        def __init__(self, card, action):
+            super().__init__()
+            self.card, self.action = card, action
+
+    def __init__(self, profile: dict, blocked: bool = False):
+        super().__init__(classes="profile-card")
+        self.profile = profile
+        self.blocked = blocked
+
+    def compose(self) -> ComposeResult:
+        yield Static("", classes="profile-name", markup=False)
+        yield Static("", classes="profile-meta", markup=False)
+        yield Static("", classes="profile-quota", markup=False)
+        yield ProgressBar(total=100, show_eta=False, show_percentage=False, classes="profile-progress")
+        yield Static("", classes="profile-foot", markup=False)
+        with Horizontal(classes="profile-actions"):
+            for action, label in (("update", "更新 ↻"), ("edit", "编辑"), ("activate", "启用"), ("delete", "删除")):
+                yield Button(label, name=action, variant="error" if action == "delete" else "default")
+
+    def on_mount(self) -> None:
+        self.update_profile(self.profile, self.app.busy or self.app.refreshing)
+
+    def update_profile(self, profile: dict, blocked: bool) -> None:
+        self.profile, self.blocked = profile, blocked
+        active = bool(profile.get("active"))
+        self.set_class(active, "active-profile")
+        self.query_one(".profile-name", Static).update(("● " if active else "") + profile.get("name", ""))
+        host = urlsplit(profile.get("url") or "").hostname or "本地订阅"
+        self.query_one(".profile-meta", Static).update(f"{host}  ·  更新 {(profile.get('updated_at') or '未更新')[:16]}")
+        used = None if profile.get("traffic_upload") is None and profile.get("traffic_download") is None else (profile.get("traffic_upload") or 0) + (profile.get("traffic_download") or 0)
+        total = profile.get("traffic_total")
+        self.query_one(".profile-quota", Static).update(f"{traffic(used)} / {traffic(total)}  ·  到期 {expiry(profile.get('expire_at'))}")
+        self.query_one(ProgressBar).update(progress=min(100, 100 * (used or 0) / total) if total and total > 0 else 0)
+        foot = "当前使用" if active else "已下载" if profile.get("has_cache") else "尚未下载 · 点更新"
+        self.query_one(".profile-foot", Static).update(f"{foot}  ·  {profile.get('node_count') if profile.get('node_count') is not None else '—'} 节点  ·  {'代理下载' if profile.get('via_proxy') else '直连'}")
+        for button in self.query(Button):
+            button.disabled = blocked or (active and button.name in ("activate", "delete"))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.post_message(self.Action(self, event.button.name))
+
+    def on_key(self, event) -> None:
+        if event.key in ("up", "down"):
+            cards = list(self.parent.query(SubscriptionCard))
+            index = cards.index(self) + (-1 if event.key == "up" else 1)
+            cards[max(0, min(len(cards) - 1, index))].focus()
+        elif event.key in ("enter", "space") and self.has_focus:
+            if not self.blocked and not self.profile.get("active"):
+                self.post_message(self.Action(self, "activate"))
+        else:
+            return
+        event.stop()
+        event.prevent_default()
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -239,14 +299,12 @@ class MihomoApp(App):
                     yield Button("全组测速", id="measure-all")
                     yield Button("停止测速", id="measure-cancel", disabled=True)
             with TabPane("订阅", id="subscriptions"):
-                yield DataTable(id="profiles-table", cursor_type="row", zebra_stripes=True)
-                yield Static("↑↓ 选择订阅；Enter 启用。更新会从服务商重新下载。", classes="muted")
                 with Horizontal(classes="toolbar"):
-                    yield Button("导入", variant="primary", id="sub-new")
-                    yield Button("编辑", id="sub-edit")
-                    yield Button("更新", id="sub-update")
-                    yield Button("启用", id="sub-activate")
-                    yield Button("删除", variant="error", id="sub-delete")
+                    yield Button("导入订阅 +", variant="primary", id="sub-new")
+                yield Static("Tab / ↑↓ 浏览卡片；Enter 启用。更新仅下载该订阅。", classes="muted")
+                with VerticalScroll(id="profiles-scroll"):
+                    yield Grid(id="profiles-grid")
+                    yield Static("尚未添加订阅，点击「导入订阅」开始。", id="profiles-empty", markup=False)
         with Horizontal(id="bottom-bar"):
             yield Static("准备连接…", id="status-line", markup=False)
             yield Button("启动 Mihomo", id="start-core", variant="success")
@@ -255,7 +313,6 @@ class MihomoApp(App):
     def on_mount(self) -> None:
         self.query_one("#groups-table", DataTable).add_columns("代理组", "数量")
         self.query_one("#nodes-table", DataTable).add_columns("当前", "节点 / 策略", "协议", "延迟")
-        self.query_one("#profiles-table", DataTable).add_columns("当前", "订阅", "节点", "已用 / 总量", "到期", "更新时间", "缓存 / 下载")
         self.ready = True
         self.action_refresh()
         self.set_interval(15, self.auto_refresh)
@@ -401,11 +458,10 @@ class MihomoApp(App):
             if button_id == "measure-all":
                 enabled = enabled and has_group
             self.query_one("#" + button_id, Button).disabled = blocked or not enabled
-        for button_id in ("sub-new", "sub-edit", "sub-update", "sub-activate", "sub-delete"):
-            enabled = button_id == "sub-new" or profile is not None
-            if button_id in ("sub-activate", "sub-delete") and profile and profile.get("active"):
-                enabled = False
-            self.query_one("#" + button_id, Button).disabled = blocked or not enabled
+        self.query_one("#sub-new", Button).disabled = blocked
+        for card in self.query(SubscriptionCard):
+            if card.is_mounted:
+                card.update_profile(card.profile, blocked)
         self.query_one("#home-clear-results", Button).disabled = blocked or not (self.site_results or self.ip_results)
         self.query_one("#measure-cancel", Button).disabled = not self.measuring or self.cancel_measure
         self.query_one("#start-core", Button).disabled = blocked or running
@@ -509,20 +565,27 @@ class MihomoApp(App):
         self._sync_controls()
 
     def _render_profiles(self) -> None:
-        table = self.query_one("#profiles-table", DataTable)
         rows = self.state.get("subscriptions", {}).get("items", [])
-        if not any(row["id"] == self.selected_profile for row in rows):
-            self.selected_profile = next((row["id"] for row in rows if row.get("active")), rows[0]["id"] if rows else "")
-        with table.prevent(DataTable.RowHighlighted, DataTable.RowSelected):
-            table.clear()
-            for row in rows:
-                used = None if row.get("traffic_upload") is None and row.get("traffic_download") is None else (row.get("traffic_upload") or 0) + (row.get("traffic_download") or 0)
-                table.add_row("●" if row.get("active") else "", Text(row.get("name", "")), str(row.get("node_count") or "—"),
-                              f"{traffic(used)} / {traffic(row.get('traffic_total'))}", expiry(row.get("expire_at")),
-                              Text((row.get("updated_at") or "未更新")[:16]), ("已下载" if row.get("has_cache") else "未下载") + (" / 代理" if row.get("via_proxy") else " / 直连"), key=row["id"])
-            ids = [row["id"] for row in rows]
-            if self.selected_profile in ids:
-                table.move_cursor(row=ids.index(self.selected_profile))
+        grid = self.query_one("#profiles-grid", Grid)
+        cards = list(grid.query(SubscriptionCard))
+        blocked = self.busy or self.refreshing
+        if [card.profile["id"] for card in cards] == [row["id"] for row in rows]:
+            for card, row in zip(cards, rows):
+                card.update_profile(row, blocked)
+        else:
+            grid.remove_children()
+            grid.mount(*(SubscriptionCard(row, blocked) for row in rows))
+        self.query_one("#profiles-empty").display = not rows
+
+    @on(SubscriptionCard.Action)
+    def profile_action(self, event: SubscriptionCard.Action) -> None:
+        if self.busy or self.refreshing:
+            return
+        self.selected_profile = event.card.profile["id"]
+        if event.action == "edit":
+            self.push_screen(SubscriptionScreen(self._profile()), self._save_profile)
+        else:
+            self._subscription_action(event.action)
 
     def _render_summary(self) -> None:
         subs = self.state.get("subscriptions", {})
@@ -693,9 +756,6 @@ class MihomoApp(App):
             self.active_group = str(event.row_key.value)
             self._render_nodes()
             self._render_summary()
-        elif event.data_table.id == "profiles-table":
-            self.selected_profile = str(event.row_key.value)
-            self._sync_controls()
         elif event.data_table.id == "nodes-table":
             self._sync_controls()
 
@@ -703,8 +763,6 @@ class MihomoApp(App):
     def select_row(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "nodes-table":
             self._apply_node()
-        elif event.data_table.id == "profiles-table":
-            self._subscription_action("activate")
         elif event.data_table.id == "groups-table":
             self.query_one("#nodes-table", DataTable).focus()
 
@@ -901,10 +959,6 @@ class MihomoApp(App):
             self._sync_controls()
         elif button_id == "sub-new":
             self.push_screen(SubscriptionScreen(), self._save_profile)
-        elif button_id == "sub-edit" and self._profile():
-            self.push_screen(SubscriptionScreen(self._profile()), self._save_profile)
-        elif button_id in ("sub-update", "sub-activate", "sub-delete"):
-            self._subscription_action(button_id.removeprefix("sub-"))
         elif button_id == "home-repair-system":
             self._start_job("修复系统代理地址", lambda: self.manager.system_proxy(True))
         elif button_id == "home-check-ip":
