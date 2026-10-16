@@ -1,7 +1,11 @@
 import asyncio
 import copy
+import json
+import tempfile
 import threading
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from textual.widgets import Button, DataTable, Input, Select, Switch, TabbedContent
@@ -78,6 +82,16 @@ class FakeManager:
 
 
 class TuiTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._state_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._state_dir.cleanup)
+        config_patch = patch(
+            "mihomo_mgr.tui.load_config",
+            return_value=SimpleNamespace(mihomo_dir=Path(self._state_dir.name)),
+        )
+        config_patch.start()
+        self.addCleanup(config_patch.stop)
+
     async def mount(self, app, pilot):
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -87,11 +101,61 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
         app = MihomoApp(manager)
         async with app.run_test(size=(110, 38)) as pilot:
             await self.mount(app, pilot)
-            self.assertEqual(app.query_one("#nodes-table", DataTable).row_count, 3)
+            self.assertEqual(app.query_one("#nodes-table", DataTable).row_count, 1)
+            self.assertEqual(len(app.query_one("#nodes-table", DataTable).columns), 3)
             self.assertEqual(manager.calls, [])
             app.action_refresh()
             await self.mount(app, pilot)
             self.assertEqual(manager.calls, [])
+
+    async def test_long_current_node_name_does_not_expand_overview_selector_row(self):
+        manager = FakeManager()
+        long_name = "A very long node name " * 5
+        manager.state["groups"]["main"]["now"] = long_name
+        manager.state["groups"]["main"]["all"] = [long_name, "node-b"]
+        manager.state["proxies"][long_name] = {"type": "Trojan"}
+        app = MihomoApp(manager)
+        async with app.run_test(size=(110, 38)) as pilot:
+            await self.mount(app, pilot)
+            self.assertEqual(app.query_one("#overview-node").region.height, 3)
+            self.assertEqual(app.query_one("#overview-selectors").region.height, 3)
+            self.assertEqual(app.query_one("#node-card").region.width, 53)
+
+    async def test_emoji_names_are_preserved_in_display_and_node_switch(self):
+        manager = FakeManager()
+        group, first, second = "🦊 main", "🇯🇵 日本D1", "🇸🇬 新加坡D2"
+        manager.state["main"] = group
+        manager.state["groups"][group] = manager.state["groups"].pop("main")
+        manager.state["groups"][group].update(now=first, all=[first, second])
+        for name in (first, second):
+            manager.state["proxies"][name] = {"type": "Trojan"}
+        app = MihomoApp(manager)
+        async with app.run_test(size=(110, 38)) as pilot:
+            await self.mount(app, pilot)
+            summary = app.query_one("#node-summary").render().plain
+            self.assertIn(first, summary)
+            self.assertIn(group, summary)
+            self.assertEqual(app.query_one("#overview-group", Select).value, group)
+            app.query_one("#overview-node", Select).value = second
+            await self.mount(app, pilot)
+            await pilot.click("#overview-switch")
+            await self.mount(app, pilot)
+            self.assertEqual(manager.calls, [("select", group, second)])
+
+    async def test_three_column_node_cells_show_latency_on_one_line(self):
+        app = MihomoApp(FakeManager())
+        async with app.run_test(size=(110, 38)) as pilot:
+            await self.mount(app, pilot)
+            first_row = app.query_one("#nodes-table", DataTable).get_row_at(0)
+            self.assertTrue(first_row[0].plain.startswith("当前: node-a · main"))
+            await pilot.press("1")
+            table = app.query_one("#nodes-table", DataTable)
+            app.delays["node-a"] = {"ok": True, "delay": 42}
+            app._render_nodes()
+            await pilot.pause()
+            self.assertEqual(table.get_row_height(table.ordered_rows[0].key), 1)
+            self.assertIn("42 ms", table.get_row_at(0)[0].plain)
+            self.assertNotIn("Trojan", table.get_row_at(0)[0].plain)
 
     async def test_keyboard_group_then_node_selection_targets_chosen_group(self):
         manager = FakeManager()
@@ -100,22 +164,70 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             await self.mount(app, pilot)
             await pilot.press("g", "down")
             self.assertEqual(app.active_group, "stream")
+            self.assertEqual(app.query_one("#groups-table", DataTable).get_row_at(1)[0].plain, "● stream")
+            self.assertEqual(app.query_one("#overview-group", Select).value, "main")
+            self.assertIn("node-a", app.query_one("#node-summary").render().plain)
             self.assertEqual(manager.calls, [])
-            await pilot.press("enter", "down", "enter")
+            await pilot.press("enter")
+            self.assertEqual(app.query_one("#groups-table", DataTable).get_row_at(1)[0].plain, "● stream")
+            await pilot.press("right", "right", "enter")
             await self.mount(app, pilot)
             self.assertIn(("select", "stream", "node-d"), manager.calls)
             self.assertEqual(app.state["groups"]["main"]["now"], "node-a")
             self.assertEqual(app.state["groups"]["stream"]["now"], "node-d")
 
-    async def test_search_input_does_not_trigger_quit_or_navigation_bindings(self):
+    async def test_last_proxy_group_is_restored_on_next_tui_launch(self):
+        first = MihomoApp(FakeManager())
+        async with first.run_test(size=(110, 38)) as pilot:
+            await self.mount(first, pilot)
+            await pilot.press("g", "down")
+            self.assertEqual(first.active_group, "stream")
+
+        second = MihomoApp(FakeManager())
+        async with second.run_test(size=(110, 38)) as pilot:
+            await self.mount(second, pilot)
+            self.assertEqual(second.active_group, "stream")
+            self.assertEqual(second.query_one("#overview-group", Select).value, "main")
+
+    async def test_overview_group_browsing_does_not_persist_without_switch(self):
+        first = MihomoApp(FakeManager())
+        async with first.run_test(size=(110, 38)) as pilot:
+            await self.mount(first, pilot)
+            group_select = first.query_one("#overview-group", Select)
+            first.choose_overview(Select.Changed(group_select, "stream"))
+            self.assertEqual(first.overview_group, "stream")
+            self.assertEqual(first.active_group, "stream")
+
+        second = MihomoApp(FakeManager())
+        async with second.run_test(size=(110, 38)) as pilot:
+            await self.mount(second, pilot)
+            self.assertEqual(second.overview_group, "main")
+            self.assertEqual(second.query_one("#overview-group", Select).value, "main")
+
+    async def test_clicking_proxy_group_does_not_change_current_node_card(self):
         app = MihomoApp(FakeManager())
         async with app.run_test(size=(110, 38)) as pilot:
             await self.mount(app, pilot)
-            await pilot.press("/", "n", "o", "d", "e", "-", "b")
+            await pilot.press("1")
+            await pilot.click(app.query_one("#groups-table", DataTable), offset=(5, 2))
+            self.assertEqual(app.active_group, "stream")
+            self.assertEqual(app.query_one("#overview-group", Select).value, "main")
+            self.assertEqual(app.query_one("#overview-node", Select).value, "node-a")
+            self.assertIn("node-a", app.query_one("#node-summary").render().plain)
+            first_row = app.query_one("#nodes-table", DataTable).get_row_at(0)
+            self.assertIn("node-a · main", first_row[0].plain)
+            self.assertTrue(first_row[1].plain.startswith("node-c ·"))
+            self.assertTrue(first_row[0].plain.startswith("当前: node-a · main"))
+            self.assertNotIn("●", first_row[0].plain)
+            self.assertNotIn("●", first_row[1].plain)
+
+    async def test_node_search_and_sort_controls_are_removed(self):
+        app = MihomoApp(FakeManager())
+        async with app.run_test(size=(110, 38)) as pilot:
+            await self.mount(app, pilot)
+            self.assertEqual(len(app.query("#node-search")), 0)
+            self.assertEqual(len(app.query("#node-sort")), 0)
             self.assertEqual(app.query_one("#nodes-table", DataTable).row_count, 1)
-            await pilot.press("q")
-            self.assertTrue(app.is_running)
-            self.assertEqual(app.query_one("#node-search", Input).value, "node-bq")
 
     async def test_failed_node_switch_keeps_actual_selection(self):
         manager = FakeManager()
@@ -128,7 +240,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.state["groups"]["main"]["now"], "node-a")
             self.assertFalse(app.busy)
 
-    async def test_measurement_does_not_block_search_or_allow_second_mutation(self):
+    async def test_measurement_does_not_block_ui_or_allow_second_mutation(self):
         manager = FakeManager()
         manager.gate = threading.Event()
         app = MihomoApp(manager)
@@ -138,7 +250,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             await pilot.click("#measure-all")
             self.assertTrue(await asyncio.to_thread(manager.started.wait, 2))
             try:
-                await pilot.press("/", "b")
+                await pilot.press("1")
                 self.assertTrue(app.busy)
                 self.assertEqual(app.query_one("#nodes-table", DataTable).row_count, 1)
                 self.assertTrue(app.query_one("#apply-node").disabled)
@@ -484,7 +596,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             await self.mount(app, pilot)
             self.assertEqual(manager.calls, [("system", True)])
 
-    async def test_overview_group_is_read_only_and_node_change_reads_back(self):
+    async def test_overview_group_and_node_selection_apply_only_after_switch(self):
         manager = FakeManager()
         app = MihomoApp(manager)
         async with app.run_test(size=(120, 42)) as pilot:
@@ -496,12 +608,26 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#overview-node", Select).value, "node-c")
             app.query_one("#overview-node", Select).value = "node-d"
             await self.mount(app, pilot)
+            self.assertEqual(manager.calls, [])
+            self.assertEqual(app.query_one("#overview-node", Select).value, "node-d")
+            await pilot.click("#overview-switch")
+            await self.mount(app, pilot)
             self.assertEqual(manager.calls, [("select", "stream", "node-d")])
             self.assertEqual(app.query_one("#overview-node", Select).value, "node-d")
+            saved = json.loads(app._ui_state_path.read_text(encoding="utf-8"))
+            self.assertEqual((saved["overview_group"], saved["overview_node"]), ("stream", "node-d"))
+            reopened = MihomoApp(FakeManager())
+            async with reopened.run_test(size=(120, 42)) as reopened_pilot:
+                await self.mount(reopened, reopened_pilot)
+                self.assertEqual(reopened.overview_group, "stream")
+                self.assertEqual(reopened.query_one("#overview-node", Select).value, "node-d")
             manager.fail_select = True
             app.query_one("#overview-node", Select).value = "node-c"
             await self.mount(app, pilot)
-            self.assertEqual(app.query_one("#overview-node", Select).value, "node-d")
+            await pilot.click("#overview-switch")
+            await self.mount(app, pilot)
+            self.assertEqual(app.query_one("#overview-node", Select).value, "node-c")
+            self.assertEqual(manager.calls[-1], ("select", "stream", "node-c"))
 
     async def test_global_outbound_and_direct_mode_controls(self):
         manager = FakeManager()
@@ -512,6 +638,9 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(app.query_one("#overview-group", Select).disabled)
             self.assertTrue(app.query_one("#home-global-node").display)
             app.query_one("#home-global-node", Select).value = "node-d"
+            await self.mount(app, pilot)
+            self.assertEqual(manager.calls, [])
+            await pilot.click("#overview-switch")
             await self.mount(app, pilot)
             self.assertEqual(manager.calls, [("select", "GLOBAL", "node-d")])
             self.assertEqual(app.query_one("#overview-node", Select).value, "node-d")

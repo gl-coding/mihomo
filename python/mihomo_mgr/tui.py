@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from datetime import datetime
@@ -18,6 +19,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Label, ProgressBar, Select, Static, Switch, TabbedContent, TabPane
 
 from .service import CONNECTIVITY_TARGETS
+from .config import load_config
 from .subscription import SubscriptionError
 from .tui_service import EXPECTED_ERRORS, Manager, expiry, resolve_node, traffic
 
@@ -176,7 +178,7 @@ class MihomoApp(App):
     BINDINGS = [
         Binding("0", "show_tab('dashboard')", "概览"),
         Binding("1", "show_tab('nodes')", "节点"), Binding("2", "show_tab('subscriptions')", "订阅"),
-        Binding("r", "refresh", "刷新"), Binding("/", "search", "搜索"),
+        Binding("r", "refresh", "刷新"),
         Binding("g", "focus_groups", "代理组", show=False), Binding("n", "focus_nodes", "节点表", show=False),
         Binding("f2", "toggle_theme", "主题", show=False),
         Binding("q", "request_quit", "退出"), Binding("ctrl+q", "request_quit", show=False, priority=True),
@@ -192,7 +194,14 @@ class MihomoApp(App):
         self.theme = "mihomo-light"
         self.manager = manager or Manager()
         self.state: dict = {}
-        self.active_group = ""
+        self._ui_state_path = load_config().mihomo_dir / "env" / ".tui-state.json"
+        ui_state = self._load_ui_state()
+        last_group = ui_state.get("last_group", "")
+        overview_group = ui_state.get("overview_group", "")
+        self.active_group = last_group if isinstance(last_group, str) else ""
+        self.overview_group = overview_group if isinstance(overview_group, str) else ""
+        overview_node = ui_state.get("overview_node", "")
+        self.pending_node = overview_node if isinstance(overview_node, str) else ""
         self.delays: dict[str, dict] = {}
         self.busy = False
         self.refreshing = False
@@ -205,6 +214,45 @@ class MihomoApp(App):
         self.network_tab = "system"
         self.selected_profile = ""
         self.last_active_profile = ""
+
+    def _load_ui_state(self) -> dict:
+        try:
+            value = json.loads(self._ui_state_path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _remember_group(self, key: str, group: str) -> None:
+        if not group:
+            return
+        try:
+            self._ui_state_path.parent.mkdir(parents=True, exist_ok=True)
+            ui_state = self._load_ui_state()
+            ui_state[key] = group
+            self._ui_state_path.write_text(
+                json.dumps(ui_state, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            logging.getLogger(__name__).warning("无法保存 TUI 代理组选择")
+
+    def _remember_active_group(self) -> None:
+        self._remember_group("last_group", self.active_group)
+
+    def _remember_overview_selection(self, group: str, node: str) -> None:
+        if not group or not node:
+            return
+        try:
+            self._ui_state_path.parent.mkdir(parents=True, exist_ok=True)
+            ui_state = self._load_ui_state()
+            ui_state["overview_group"] = group
+            ui_state["overview_node"] = node
+            self._ui_state_path.write_text(
+                json.dumps(ui_state, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            logging.getLogger(__name__).warning("无法保存 TUI 当前节点选择")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top-header"):
@@ -229,6 +277,7 @@ class MihomoApp(App):
                 with Horizontal(id="overview-selectors"):
                     yield Select([], prompt="代理组", id="overview-group")
                     yield Select([], prompt="节点", id="overview-node")
+                    yield Button("切换", id="overview-switch", compact=True, variant="primary")
                 yield Static("", id="node-footer", classes="card-footnote", markup=False)
         with TabbedContent(initial="dashboard", id="pages"):
             with TabPane("概览", id="dashboard"):
@@ -288,10 +337,8 @@ class MihomoApp(App):
                         yield Label("代理组 · ↑↓ 选择", classes="section-label")
                         yield DataTable(id="groups-table", cursor_type="row", zebra_stripes=True)
                     with Vertical(id="node-panel"):
-                        with Horizontal(classes="toolbar"):
-                            yield Input(placeholder="搜索节点名称 / 协议（/）", id="node-search")
-                            yield Select([("原始顺序", "original"), ("延迟排序", "delay"), ("名称排序", "name")], value="original", allow_blank=False, id="node-sort")
-                        yield DataTable(id="nodes-table", cursor_type="row", zebra_stripes=True)
+                        yield DataTable(id="nodes-table", cursor_type="cell", show_header=False,
+                                        show_row_labels=False, zebra_stripes=True)
                         yield Static("请选择代理组", id="group-status", markup=False)
                 with Horizontal(classes="toolbar"):
                     yield Button("应用节点 ↵", variant="primary", id="apply-node")
@@ -311,8 +358,10 @@ class MihomoApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#groups-table", DataTable).add_columns("代理组", "数量")
-        self.query_one("#nodes-table", DataTable).add_columns("当前", "节点 / 策略", "协议", "延迟")
+        groups_table = self.query_one("#groups-table", DataTable)
+        groups_table.add_column("代理组", key="group-name")
+        groups_table.add_column("数量", key="group-count")
+        self.query_one("#nodes-table", DataTable).add_columns("节点", "节点", "节点")
         self.ready = True
         self.action_refresh()
         self.set_interval(15, self.auto_refresh)
@@ -320,16 +369,21 @@ class MihomoApp(App):
     def on_resize(self, event) -> None:
         self.set_class(event.size.width < 100, "narrow")
         self.set_class(event.size.height < 32, "compact")
+        self.call_after_refresh(self._resize_node_columns)
+
+    def _resize_node_columns(self) -> None:
+        table = self.query_one("#nodes-table", DataTable)
+        available = table.size.width or int(self.size.width * 0.70)
+        column_width = max(10, (available - 6) // 3)
+        for column in table.columns.values():
+            column.width = column_width
+        table.refresh()
 
     def action_toggle_theme(self) -> None:
         self.theme = "textual-dark" if self.theme == "mihomo-light" else "mihomo-light"
 
     def action_show_tab(self, tab: str) -> None:
         self.query_one("#pages", TabbedContent).active = tab
-
-    def action_search(self) -> None:
-        self.action_show_tab("nodes")
-        self.query_one("#node-search", Input).focus()
 
     def action_focus_groups(self) -> None:
         self.action_show_tab("nodes")
@@ -390,9 +444,15 @@ class MihomoApp(App):
         self.state = state
         groups = state.get("groups", {})
         if state.get("core", {}).get("mode") == "global":
+            self.overview_group = "GLOBAL" if "GLOBAL" in groups else ""
             self.active_group = "GLOBAL" if "GLOBAL" in groups else ""
-        elif self.active_group not in groups or self.active_group == "GLOBAL":
-            self.active_group = state.get("main", "")
+        else:
+            if self.overview_group not in groups or self.overview_group == "GLOBAL":
+                self.overview_group = state.get("main", "")
+            if self.active_group not in groups or self.active_group == "GLOBAL":
+                self.active_group = state.get("main", "")
+        if self.pending_node not in (state.get("groups", {}).get(self.overview_group, {}).get("all") or []):
+            self.pending_node = ""
         self._render_all()
 
     def _status(self, text: str) -> None:
@@ -478,7 +538,9 @@ class MihomoApp(App):
         for select_id in ("overview-group", "overview-node", "home-global-node"):
             self.query_one("#" + select_id, Select).disabled = blocked or not running or direct or (select_id == "overview-group" and self.state.get("core", {}).get("mode") == "global")
         self.query_one("#overview-update", Button).disabled = blocked
-        selected = self.state.get("groups", {}).get(self.active_group, {}).get("now", "")
+        current_node = self.state.get("groups", {}).get(self.overview_group, {}).get("now", "")
+        self.query_one("#overview-switch", Button).disabled = blocked or not running or direct or not self.pending_node or self.pending_node == current_node
+        selected = self.state.get("groups", {}).get(self.overview_group, {}).get("now", "")
         current, _chain = resolve_node(self.state.get("proxies", {}), selected)
         self.query_one("#overview-measure", Button).disabled = blocked or not running or direct or not current or current in BUILTINS
         self.query_one("#header-refresh", Button).disabled = blocked
@@ -486,14 +548,34 @@ class MihomoApp(App):
         self.query_one("#home-repair-system", Button).disabled = blocked or not running or not net.get("supported")
         self.query_one("#groups-table", DataTable).disabled = direct or blocked
 
-    @staticmethod
-    def _cursor_key(table: DataTable) -> str:
-        if not table.row_count:
-            return ""
-        return str(table.ordered_rows[min(table.cursor_row, table.row_count - 1)].key.value)
-
     def _highlighted_node(self) -> str:
-        return self._cursor_key(self.query_one("#nodes-table", DataTable))
+        table = self.query_one("#nodes-table", DataTable)
+        items = self._node_items()
+        index = table.cursor_row * 3 + table.cursor_column
+        if not 0 <= index < len(items):
+            return ""
+        group, name = items[index]
+        return name if group == self.active_group else ""
+
+    def _node_items(self) -> list[tuple[str, str]]:
+        if self.state.get("core", {}).get("mode") == "direct":
+            return []
+        groups = self.state.get("groups", {})
+        items: list[tuple[str, str]] = []
+        selected = groups.get(self.overview_group, {}).get("now", "")
+        overview_current, _chain = resolve_node(self.state.get("proxies", {}), selected)
+        overview_current = overview_current or selected
+        if self.overview_group and overview_current:
+            items.append((self.overview_group, overview_current))
+        group = groups.get(self.active_group, {})
+        names = [name for name in (group.get("all") or []) if isinstance(name, str)]
+        current = group.get("now")
+        if current in names:
+            names.remove(current)
+            names.insert(0, current)
+        items.extend((self.active_group, name) for name in names
+                     if (self.active_group, name) not in items)
+        return items
 
     def _profile(self) -> dict | None:
         return next((row for row in self.state.get("subscriptions", {}).get("items", []) if row["id"] == self.selected_profile), None)
@@ -522,45 +604,47 @@ class MihomoApp(App):
         with table.prevent(DataTable.RowHighlighted, DataTable.RowSelected):
             table.clear()
             for name in names:
-                table.add_row(Text(name), str(len(groups[name].get("all") or [])), key=name)
+                label = Text.assemble(("● " if name == self.active_group else "  ", "bold #2563eb" if name == self.active_group else "dim"),
+                                      (name, "bold" if name == self.active_group else ""))
+                table.add_row(label, str(len(groups[name].get("all") or [])), key=name)
             if self.active_group in names:
                 table.move_cursor(row=names.index(self.active_group))
 
     def _render_nodes(self) -> None:
         table = self.query_one("#nodes-table", DataTable)
-        previous = self._cursor_key(table)
+        previous = self._highlighted_node()
         group = self.state.get("groups", {}).get(self.active_group, {})
-        query = self.query_one("#node-search", Input).value.casefold()
-        proxies = self.state.get("proxies", {})
-        names = [name for name in (group.get("all") or []) if isinstance(name, str)]
-        if self.state.get("core", {}).get("mode") == "direct":
-            names = []
-        names = [name for name in names if query in (name + " " + str(proxies.get(name, {}).get("type", ""))).casefold()]
-        order = self.query_one("#node-sort", Select).value
-        if order == "name":
-            names.sort(key=str.casefold)
-        elif order == "delay":
-            names.sort(key=lambda name: (not self.delays.get(name, {}).get("ok", False), self.delays.get(name, {}).get("delay") or 999999, name))
+        items = self._node_items()
         with table.prevent(DataTable.RowHighlighted, DataTable.RowSelected):
             table.clear()
-            for name in names:
-                delay = self.delays.get(name)
-                text, style = "—", "dim"
-                if delay:
-                    if delay.get("pending"):
-                        text = "测速中…"
-                    elif delay.get("ok"):
+            for index in range(0, len(items), 3):
+                cells = []
+                for offset, (item_group, name) in enumerate(items[index:index + 3]):
+                    delay = self.delays.get(name)
+                    if delay and delay.get("pending"):
+                        delay_text, style = "测速中", "yellow"
+                    elif delay and delay.get("ok"):
                         ms = delay["delay"]
-                        text, style = f"{ms} ms", "green" if ms < 150 else "yellow" if ms < 400 else "red"
+                        delay_text, style = f"{ms} ms", "green" if ms < 150 else "yellow" if ms < 400 else "red"
+                    elif delay:
+                        delay_text, style = "失败", "red"
                     else:
-                        text, style = "超时 / 失败", "red"
-                table.add_row("●" if name == group.get("now") else "", Text(name),
-                              Text(proxies.get(name, {}).get("type", "—")), Text(text, style=style), key=name)
-            focus = previous if previous in names else group.get("now")
-            if focus in names:
-                table.move_cursor(row=names.index(focus))
+                        delay_text, style = "—", "dim"
+                    cell = Text()
+                    label = name
+                    if index + offset == 0:
+                        label = f"当前: {name} · {item_group}"
+                    cell.append(label, style="bold")
+                    cell.append(f" · {delay_text}", style=style)
+                    cells.append(cell)
+                cells.extend(Text("") for _ in range(3 - len(cells)))
+                table.add_row(*cells, height=1, key=str(index // 3))
+            focus = next((i for i, item in enumerate(items) if item == (self.active_group, previous)), 0)
+            if items:
+                table.move_cursor(row=focus // 3, column=focus % 3)
+        self._resize_node_columns()
         actual = group.get("now", "—")
-        status = "直连模式不使用代理组" if self.state.get("core", {}).get("mode") == "direct" else f"{self.active_group or '无代理组'} → {actual} · 显示 {len(names)} 项"
+        status = "直连模式不使用代理组" if self.state.get("core", {}).get("mode") == "direct" else f"{self.active_group or '无代理组'} → {actual} · 显示 {len(items)} 项"
         self.query_one("#group-status", Static).update(status)
         self._sync_controls()
 
@@ -617,7 +701,7 @@ class MihomoApp(App):
             node = Text.assemble(("直连 · DIRECT", "bold"), "\n流量不经过代理节点", ("\n直连模式", "dim"))
             footer = "当前模式已从内核读取"
         else:
-            selected = self.state.get("groups", {}).get(self.active_group, {}).get("now", "")
+            selected = self.state.get("groups", {}).get(self.overview_group, {}).get("now", "")
             name, chain = resolve_node(self.state.get("proxies", {}), selected)
             delay = self.delays.get(name, {})
             item = self.state.get("proxies", {}).get(name, {})
@@ -628,7 +712,7 @@ class MihomoApp(App):
             else:
                 node.append("  未测速", style="dim")
             node.append(f"\n{item.get('type') or '策略组'}" + (" · UDP" if item.get("udp") else "") + f" · {mode_label}模式", style="dim")
-            node.append("\n" + " → ".join([self.active_group, *chain[:-1]]))
+            node.append("\n" + " → ".join([self.overview_group, *chain[:-1]]))
             footer = "● 内核运行中 · " + (self.state.get("version") or "Mihomo")
         self._render_overview_selectors()
         self.query_one("#node-summary", Static).update(node)
@@ -646,15 +730,16 @@ class MihomoApp(App):
         if mode == "direct":
             names = []
         selections = {
-            "overview-group": (names, self.active_group),
-            "overview-node": (groups.get(self.active_group, {}).get("all", []) if names else [], groups.get(self.active_group, {}).get("now")),
+            "overview-group": (names, self.overview_group),
+            "overview-node": (groups.get(self.overview_group, {}).get("all", []) if names else [], groups.get(self.overview_group, {}).get("now")),
             "home-global-node": (groups.get("GLOBAL", {}).get("all", []), groups.get("GLOBAL", {}).get("now")),
         }
         for widget_id, (options, actual) in selections.items():
             select = self.query_one("#" + widget_id, Select)
             with select.prevent(Select.Changed):
                 select.set_options([(name, name) for name in options])
-                select.value = actual if actual in options else Select.NULL
+                value = self.pending_node if widget_id in ("overview-node", "home-global-node") and self.pending_node in options else actual
+                select.value = value if value in options else Select.NULL
         self.query_one("#home-global-node").display = mode == "global"
 
     @on(Select.Changed, "#overview-group")
@@ -664,17 +749,18 @@ class MihomoApp(App):
         if not self.ready or self.busy or self.refreshing or event.value == Select.NULL:
             return
         if event.select.id == "overview-group":
-            self.active_group = str(event.value)
+            self.overview_group = str(event.value)
+            self.active_group = self.overview_group
+            self._remember_active_group()
+            self.pending_node = ""
             self._render_groups()
             self._render_nodes()
             self._render_summary()
             self._sync_controls()
         else:
-            group = "GLOBAL" if event.select.id == "home-global-node" else self.active_group
-            name = str(event.value)
-            self._render_overview_selectors()
-            if self.state.get("core", {}).get("mode") != "direct" and self.state.get("groups", {}).get(group, {}).get("now") != name:
-                self._start_job("切换节点", lambda: self.manager.select(group, name))
+            group = "GLOBAL" if event.select.id == "home-global-node" else self.overview_group
+            self.pending_node = str(event.value)
+            self._sync_controls()
 
     async def _verify_all(self) -> None:
         try:
@@ -753,24 +839,35 @@ class MihomoApp(App):
     @on(DataTable.RowHighlighted)
     def highlight(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "groups-table":
-            self.active_group = str(event.row_key.value)
-            self._render_nodes()
-            self._render_summary()
+            self._activate_group(str(event.row_key.value), event.data_table)
         elif event.data_table.id == "nodes-table":
             self._sync_controls()
 
+    def _activate_group(self, group: str, table: DataTable | None = None) -> None:
+        if group not in self.state.get("groups", {}):
+            return
+        previous_group = self.active_group
+        self.active_group = group
+        if previous_group != group:
+            self._remember_active_group()
+        table = table or self.query_one("#groups-table", DataTable)
+        with table.prevent(DataTable.RowHighlighted):
+            if previous_group in self.state.get("groups", {}):
+                table.update_cell(previous_group, "group-name", Text.assemble(("  ", "dim"), (previous_group, "")))
+            table.update_cell(group, "group-name", Text.assemble(("● ", "bold #2563eb"), (group, "bold")))
+        self._render_nodes()
+        self._sync_controls()
+
     @on(DataTable.RowSelected)
     def select_row(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id == "nodes-table":
-            self._apply_node()
-        elif event.data_table.id == "groups-table":
+        if event.data_table.id == "groups-table":
+            self._activate_group(str(event.row_key.value), event.data_table)
             self.query_one("#nodes-table", DataTable).focus()
 
-    @on(Input.Changed, "#node-search")
-    @on(Select.Changed, "#node-sort")
-    def filter_nodes(self) -> None:
-        if self.ready:
-            self._render_nodes()
+    @on(DataTable.CellSelected)
+    def select_node_cell(self, event: DataTable.CellSelected) -> None:
+        if event.data_table.id == "nodes-table":
+            self._apply_node()
 
     @on(Switch.Changed, "#home-system-switch")
     def toggle_system(self, event: Switch.Changed) -> None:
@@ -789,6 +886,23 @@ class MihomoApp(App):
             self.notify("该节点已在使用")
             return
         self._start_job("切换节点", lambda: self.manager.select(group, name))
+
+    def _switch_overview_node(self) -> None:
+        group, name = self.overview_group, self.pending_node
+        if not group or not name or self.state.get("core", {}).get("mode") == "direct":
+            return
+        if self.state.get("groups", {}).get(group, {}).get("now") == name:
+            return
+        self._start_job(
+            "切换节点",
+            lambda: self.manager.select(group, name),
+            callback=lambda _result: self._on_overview_node_switched(group, name),
+        )
+
+    def _on_overview_node_switched(self, group: str, name: str) -> None:
+        self.overview_group = group
+        self._remember_overview_selection(group, name)
+        self.pending_node = ""
 
     def _subscription_action(self, action: str) -> None:
         profile = self._profile()
@@ -912,10 +1026,12 @@ class MihomoApp(App):
             else:
                 self.push_screen(SubscriptionScreen(), self._save_profile)
         elif button_id == "overview-measure":
-            selected = self.state.get("groups", {}).get(self.active_group, {}).get("now", "")
+            selected = self.state.get("groups", {}).get(self.overview_group, {}).get("now", "")
             name, _chain = resolve_node(self.state.get("proxies", {}), selected)
             if name and name not in BUILTINS:
                 self._start_job("节点测速", lambda: self._measure([name]), asynchronous=True, refresh=False)
+        elif button_id == "overview-switch":
+            self._switch_overview_node()
         elif button_id == "home-verify-all":
             self._start_job("一键验证", self._verify_all, asynchronous=True, refresh=False)
         elif button_id == "overview-nodes":

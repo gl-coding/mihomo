@@ -69,8 +69,6 @@ Button.text-button:hover { text-style: underline; background: $primary 7%; }
 Input, Select { background: $surface; }
 Input { border: tall $foreground 15%; }
 Input:focus { border: round $primary; }
-#node-search { width: 1fr; margin-right: 1; }
-#node-sort { width: 18; }
 #group-status { height: 1; color: $text-muted; padding-left: 1; }
 #bottom-bar { height: 3; padding: 0 2; background: $surface; }
 #status-line { width: 1fr; height: 1; color: $text-muted; }
@@ -107,7 +105,14 @@ Button.text-button:focus { background: $primary 8%; color: $primary; border: non
 #node-summary { height: 2; }
 #overview-selectors { height: 3; }
 #overview-selectors Select { width: 1fr; min-width: 0; }
+#overview-selectors SelectCurrent { min-width: 0; height: 3; }
+#overview-selectors SelectCurrent > Static#label {
+    min-width: 0;
+    height: 1;
+    overflow: hidden;
+}
 #overview-selectors Select:first-child { margin-right: 1; }
+#overview-selectors Button { width: 8; min-width: 8; height: 3; margin-left: 1; padding: 0 1; }
 #node-footer { display: none; }
 #home-global-node { height: 3; }
 #home-mode-card { overflow-y: auto; }
